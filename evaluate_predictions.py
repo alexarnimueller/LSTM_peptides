@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 pwdir = '/Users/modlab/x/projects/LSTM/'  # working directory
 
 # read the prediction files
-ann = np.genfromtxt(pwdir + 'data/predictions/CAMP_Preds_ANN.csv', delimiter=',', dtype='object')
+# ann = np.genfromtxt(pwdir + 'data/predictions/CAMP_Preds_ANN.csv', delimiter=',', dtype='object')
 rf = np.genfromtxt(pwdir + 'data/predictions/CAMP_Preds_RF.csv', delimiter=',', dtype='object')
 svm = np.genfromtxt(pwdir + 'data/predictions/CAMP_Preds_SVM.csv', delimiter=',', dtype='object')
 da = np.genfromtxt(pwdir + 'data/predictions/CAMP_Preds_DA.csv', delimiter=',', dtype='object')
@@ -28,6 +28,12 @@ std_da = np.std(da_preds)
 
 means = [mean_rf, mean_svm, mean_da]
 stds = [std_rf, std_svm, std_da]
+
+# get percentage of inactives
+rf_non = len(np.where(rf_preds < 0.5)[0]) / float(len(rf_preds))
+svm_non = len(np.where(svm_preds < 0.5)[0]) / float(len(svm_preds))
+da_non = len(np.where(da_preds < 0.5)[0]) / float(len(da_preds))
+inactives = [rf_non, svm_non, da_non]
 
 # plot the results
 labels = ['RF', 'SVM', 'DA']
@@ -64,4 +70,4 @@ for i, l in enumerate([rf_preds, svm_preds, da_preds]):
 ax.set_xticks([x + 1 for x in range(len(labels))])
 ax.set_xticklabels(labels, fontdict=dict_font)
 ax.set_ylabel('P(AMP)', fontdict=dict_font)
-plt.savefig(pwdir + 'figures/predictions_violin.pdf')
+plt.savefig(pwdir + 'figures/predictions_violin_final.pdf')

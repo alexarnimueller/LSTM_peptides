@@ -91,9 +91,8 @@ model.add(LSTM(n_units,
                use_bias=True,
                bias_initializer='zeros',
                unit_forget_bias=True,
-               dropout=0.25))  # final layer gets 25% dropout
-
-model.add(Dense(y.shape[1], activation='softmax'))
+               dropout=0.25))  # final LSTM layer gets 25% dropout
+model.add(Dense(y.shape[1], activation='softmax'))  # dense layer combining the outputs of the last layer's units
 model.compile(loss='categorical_crossentropy', optimizer='adam')
 
 # define the checkpoint to save weights to file
