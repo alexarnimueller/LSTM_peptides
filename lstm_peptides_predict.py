@@ -7,14 +7,14 @@ from keras.models import load_model
 from modlamp.core import aa_weights, BaseSequence, save_fasta
 from progressbar import ProgressBar
 
+
 # ----------------- parameters to adapt ------------------
-seq_num = 10  # number of sequences to generate, can be smaller because too short sequences are kicked out
-seq_len = 15  # approximate length of generated sequences (afterwards joined and split at newlines)
+seq_num = 3000  # number of sequences to generate, can be smaller because too short sequences are kicked out
+seq_len = 22  # approximate length of generated sequences (afterwards joined and split at newlines)
 len_range = range(5, 51)  # range of accepted sequence lengths
 featlen = 22  # feature length, meaning how many amino acids are presented to the network at one step
 pwdir = '/Volumes/Platte1/x/projects/LSTM/'  # working directory
 # --------------------------------------------------------
-
 
 # get AA vocabulary for translation
 AAs = sorted(aa_weights().keys())
@@ -56,9 +56,9 @@ pep.sequences = ''.join(pep.sequences).split(' ')  # join all sequences and spli
 pep.sequences = [s for s in pep.sequences if len(s) in len_range]  # kick out all sequences that are too short
 pep.filter_duplicates()  # kick out duplicates
 
-print("Generated sequences: %i \n" % len(pep.sequences))
 for s in pep.sequences:
     print(s)
+print("\n\tgenerated %i sequences\n" % len(pep.sequences))
     
 save_fasta(pep, pwdir + "data/test.fasta")  # save the generated sequences
 
