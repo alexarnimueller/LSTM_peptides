@@ -6,8 +6,8 @@ The code relies on the keras package by Chollet and others (https://github.com/f
 ### Content
 - README.md: this file
 - LSTM_peptides.py: contains the main code in the following two classes:
-  - LSTMpeptide: class that is used for reading amino acid sequences and translating them into a one-hot vector encoding. 
-  - Model: class that generates and trains the model, can perform cross-validation and plot training and validation loss.
+  - `SequenceHandler`: class that is used for reading amino acid sequences and translating them into a one-hot vector encoding. 
+  - `Model`: class that generates and trains the model, can perform cross-validation and plot training and validation loss.
  - requirements.txt: requirements / package dependencies
  - LICENSE: MIT opensource license
 

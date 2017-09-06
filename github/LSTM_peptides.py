@@ -1,29 +1,26 @@
 # -*- coding: utf-8 -*-
 """
-Code for training a LSTM model on peptide sequences followed by generating novel sequences through the model.
-Change the filenames in the main() function to adapt it to your case.
-
 ..author:: Alex Müller, ETH Zürich, Switzerland.
-..date:: June 2017
+..date:: September 2017
+
+Code for training a LSTM model on peptide sequences followed by sampling novel sequences through the model.
+Change the filenames at the end of the script to adapt it to your needs.
 """
 import matplotlib.pyplot as plt
 import numpy as np
 from keras.initializers import RandomNormal
-from keras.layers import Dense, LSTM
+from keras.layers import Dense, LSTM, BatchNormalization, TimeDistributed
 from keras.models import Sequential
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
 
 
-class LSTMpeptide(object):
+class SequenceHandler(object):
     """
     Class for handling peptide sequences, e.g. one-hot encoding or decoding
     """
     
     def __init__(self):
-        """
-        :param wdir: {str} working directory
-        """
         self.sequences = None
         self.X = list()
         self.y = list()
@@ -44,24 +41,56 @@ class LSTMpeptide(object):
         """
         with open(filename) as f:
             self.sequences = [s.strip() for s in f]
+
+    def pad_sequences(self, pad_char=' ', given_len=0):
+        """
+        Pad all sequences to the longest length (default) or a given length
+        
+        :param pad_char: {str} Character to pad sequences with
+        :param given_len: {int} Custom length to pad sequences to (optional), default: length of longest sequence
+        """
+        if given_len == 0:
+            length = max([len(seq) for seq in self.sequences])
+        else:
+            length = given_len
+        
+        padded_seqs = []
+        for seq in self.sequences:
+            padded_seq = seq + [pad_char] * (length - len(seq))
+            padded_seqs += [padded_seq]
+        
+        if pad_char not in self.vocab:
+            self.vocab += [pad_char]
+            
+        self.sequences = padded_seqs  # overwrite sequences with padded sequences
     
     def one_hot_encode(self, window=22, step=2):
         """Chop up loaded sequences into patterns of length ``window`` by moving by stepsize ``step`` and translate
         them with a one-hot vector encoding
         
-        :param window: {int} size of window to move over the sequences in self.sequences
+        :param window: {int} size of window to move over the sequences in ``self.sequences``. If ``window=0``,
+        the whole sequence length is processed. This is needed if the sequences are all padded to the same length.
         :param step: {int} size of the steps to move the window forward
         :return: one-hot encoded sequence patterns in self.X and corresponding target amino acids in self.y
         """
-        text = ' '.join(self.sequences)
-        for i in range(0, len(text) - window, step):
-            seq_in = text[i: i + window]  # training data (-> X)
-            seq_out = text[i + window]  # target data (-> y)
-            self.X.append([self.to_one_hot[char] for char in seq_in])
-            self.y.append(self.to_one_hot[seq_out])
+        if window == 0:
+            for s in self.sequences:
+                self.X.append([self.to_one_hot[char] for char in s[:-1]])
+                self.y.append([self.to_one_hot[char] for char in s[1:]])
+            
+            self.X = np.reshape(self.X, (len(self.X), len(self.vocab)))
+            self.y = np.reshape(self.y, (len(self.y), len(self.vocab)))
         
-        self.X = np.reshape(self.X, (len(self.X), window, len(self.vocab)))
-        self.y = np.reshape(self.y, (self.X.shape[0], len(self.vocab)))
+        else:
+            text = ' '.join(self.sequences)
+            for i in range(0, len(text) - window - 1, step):
+                seq_in = text[i: i + window]  # training data (-> X)
+                seq_out = text[i+1: i + 1 + window]  # target data (-> y)
+                self.X.append([self.to_one_hot[char] for char in seq_in])
+                self.y.append([self.to_one_hot[char] for char in seq_out])
+        
+            self.X = np.reshape(self.X, (len(self.X), window, len(self.vocab)))
+            self.y = np.reshape(self.y, (self.X.shape[0], len(self.vocab)))
     
     def decode(self, matrix, lenmin=5, lenmax=50, filename=None):
         """Decode a given one-hot represented matrix back into sequences
@@ -86,6 +115,8 @@ class LSTMpeptide(object):
                     f.write(s + '\n')
         else:
             return list(set(sequences))  # filter duplicates
+        
+        print("%i duplicates were present (removed)" % (len(sequences) - len(set(sequences))))
 
 
 class Model(object):
@@ -107,26 +138,31 @@ class Model(object):
         self.outshape = outshape
         weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # init weights randomly between -0.05 and 0.05
         self.model = Sequential()
+        self.model.add(BatchNormalization(input_shape=inshape))
         self.model.add(LSTM(n_units, name='LSTM1',
                             input_shape=inshape,
                             return_sequences=True,
                             kernel_initializer=weight_init,
                             use_bias=True,
                             bias_initializer='zeros',
-                            unit_forget_bias=True))
+                            unit_forget_bias=True,
+                            dropout=0.2))
         self.model.add(LSTM(n_units, name='LSTM2',
                             return_sequences=True,
                             kernel_initializer=weight_init,
                             use_bias=True,
                             bias_initializer='zeros',
-                            unit_forget_bias=True))
-        self.model.add(LSTM(n_units, name='LSTM3',
-                            kernel_initializer=weight_init,
-                            use_bias=True,
-                            bias_initializer='zeros',
                             unit_forget_bias=True,
-                            dropout=0.25))  # final LSTM layer gets 25% dropout
-        self.model.add(Dense(outshape, activation='softmax'))  # combining the outputs of the last layer's units
+                            dropout=0.4))
+        # self.model.add(LSTM(n_units, name='LSTM3',
+        #                     kernel_initializer=weight_init,
+        #                     use_bias=True,
+        #                     return_sequences=True,
+        #                     bias_initializer='zeros',
+        #                     unit_forget_bias=True,
+        #                     dropout=0.25))  # final LSTM layer gets 25% dropout
+        self.model.add(BatchNormalization())
+        self.model.add(TimeDistributed(Dense(outshape, activation='softmax')))  # combining outputs of last layer units
         self.model.compile(loss=loss, optimizer=optimizer)
         
         self.losses = None
@@ -222,16 +258,10 @@ class Model(object):
         return X
 
 
-def main():
-    #### adapt filenames ####
-    inputfile = 'training_sequences_filename.csv'
-    outputfile = 'filename_to_save_generated_sequences.csv'
-    outputfile_plot = 'output_filename_for_plot.pdf'
-    #########################
-    
+def main(infile, outfile, plotfile):
     # loading sequence data and encoding it
-    data = LSTMpeptide()
-    data.load_sequences(inputfile)
+    data = SequenceHandler()
+    data.load_sequences(infile)
     data.one_hot_encode()
     
     # building 3-layer LSTM model
@@ -242,18 +272,25 @@ def main():
                   seed=1749)
     
     # training model on data
-    model.train(data.X, data.y,
-                epochs=20,
-                batchsize=128,
+    model.train(data.X, data.y, 
+                epochs=20, 
+                batchsize=128, 
                 valsplit=0.1)
     
     # plot loss
-    model.plot_losses(outputfile_plot)
+    model.plot_losses(plotfile)
     
     # generating new data
     gen = model.generate(3000)  # generation for 3000 cycles
-    data.decode(gen, filename=outputfile)  # save generated sequences to a file
+    data.decode(gen, filename=outfile)  # save generated sequences to a file
 
 
 if __name__ == "__main__":
-    main()
+    
+    #### adapt filenames ####
+    inputfile = 'training_sequences_filename.csv'
+    outputfile = 'filename_to_save_generated_sequences.csv'
+    outputfile_plot = 'output_filename_for_plot.pdf'
+    #########################
+    
+    main(inputfile, outputfile, outputfile_plot)
