@@ -26,6 +26,26 @@ K.set_session(sess)
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
+flags = tf.app.flags
+
+flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
+flags.DEFINE_string("run_name", "test", "run name for log and checkpoint files")
+flags.DEFINE_integer("batch_size", 128, "batch size")
+flags.DEFINE_integer("epochs", 25, "epochs to train")
+flags.DEFINE_integer("layers", 2, "number of layers in the network")
+flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
+flags.DEFINE_integer("neurons", 256, "number of units per layer")
+flags.DEFINE_integer("sample", 5, "number of sequences to sample after every epoch.")
+flags.DEFINE_float("temp", 0.8, "temperature used for sampling")
+flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
+flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
+flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
+flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
+flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
+                                  "longest sequence length in the dataset")
+
+FLAGS = flags.FLAGS
+
 
 def onehotencode(s, vocab=None):
     """Function to one-hot encode a sring.
@@ -245,13 +265,14 @@ class Model(object):
         self.model.add(TimeDistributed(Dense(self.outshape, activation='softmax', name='Dense')))
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
     
-    def train(self, X, y, epochs=10, valsplit=0.2):
+    def train(self, X, y, epochs=10, valsplit=0.2, sample=5):
         """Train the model on given training data.
         
         :param X: {array} training data
         :param y: {array} targets for training data in X
         :param epochs: {int} number of epochs to train
         :param valsplit: {float} fraction of data that should be used as validation data during training
+        :param sample: {int} number of sequences to sample after every training epoch
         :return: trained model and measured losses in self.model, self.losses and self.val_losses
         """
         for e in range(epochs):
@@ -263,10 +284,11 @@ class Model(object):
             writer.add_summary(loss_sum, e)
             
             self.losses.append(train_history.history['loss'])
-            self.val_losses.append(train_history.history['val_loss'])
-            
-            for s in self.sample(5):  # sample 5 sequences after every training epoch
-                print(s)
+            if valsplit > 0.:
+                self.val_losses.append(train_history.history['val_loss'])
+            if sample:
+                for s in self.sample(sample):  # sample 5 sequences after every training epoch
+                    print(s)
     
     def cross_val(self, X, y, epochs=10, cv=5, plot=True):
         """Method to perform crossvalidation with the model given data X, y
@@ -324,7 +346,8 @@ class Model(object):
             fname = self.logdir + '/loss_plot.pdf'
             x = range(1, len(self.losses) + 1)
             ax.plot(x, self.losses, '-', color='#FE4365', label='Training')
-            ax.plot(x, self.val_losses, '-', color='k', label='Validation')
+            if self.val_losses:
+                ax.plot(x, self.val_losses, '-', color='k', label='Validation')
             ax.set_xlim([0.5, len(self.losses) + 0.5])
         ax.set_ylabel('Loss', fontweight='bold', fontsize=14)
         ax.set_xlabel('Epoch', fontweight='bold', fontsize=14)
@@ -338,12 +361,13 @@ class Model(object):
         else:
             plt.savefig(fname)
     
-    def sample(self, num=10, maxlen=50, start=None, show=False):
+    def sample(self, num=10, maxlen=50, start=None, temp=1., show=False):
         """Invoke generation of sequence patterns through sampling from the trained model.
         
         :param num: {int} number of sequences to sample
         :param maxlen: {int} maximal length of each pattern generated, if ``seqlen=0``, = longest sequence length
         :param start: {str} start AA to be used for sampling. If ``None``, a random AA is chosen
+        :param temp: {float} temperature value to sample at.
         :param show: {bool} whether the sampled sequences should be printed out
         :return: {array} matrix of patterns of shape (num, seqlen, inputshape[0])
         """
@@ -364,7 +388,7 @@ class Model(object):
             while sequence[-1] != 'Z' and len(sequence) <= maxlen:
                 x, _, _ = onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
-                next_aa = self.sample_with_temp(preds, temp=1.2)
+                next_aa = self.sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
             if show:
                 print(sequence)
@@ -395,7 +419,7 @@ class Model(object):
         
 
 def main(infile, sessname, window=0, neurons=256, layers=2, epochs=10, batchsize=64, valsplit=0.2,
-         sample=10, dropout=0.1, train=True, modfile=None, cv=None):
+         sample=10, temperature=0.8, dropout=0.1, train=True, modfile=None, cv=None):
     
     # loading sequence data and encoding it
     data = SequenceHandler()
@@ -424,7 +448,7 @@ def main(infile, sessname, window=0, neurons=256, layers=2, epochs=10, batchsize
         else:
             # training model on data
             print("\nTRAINING MODEL...\n")
-            model.train(data.X, data.y, epochs=epochs, valsplit=valsplit)
+            model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
             # plot loss
             model.plot_losses()
         
@@ -434,15 +458,14 @@ def main(infile, sessname, window=0, neurons=256, layers=2, epochs=10, batchsize
     
     # generating new data
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
-    gen = model.sample(sample, maxlen=36, show=False)  # sampling sequences after final epoch
+    gen = model.sample(sample, maxlen=36, show=False, temp=temperature)  # sampling sequences after final epoch
     with open(model.logdir + '/sampled_sequences.csv', 'w') as f:
         for s in gen:
             f.write(s + '\n')
 
 
 if __name__ == "__main__":
-    inputfile = '/home/gputest/Alex/LSTM/data/training_sequences_noC.csv'
-    outputfile = '/home/gputest/Alex/LSTM/data/generated/Sept_256_2layer_0204dropout_3000seqs.csv'
-    modelfile = '/home/gputest/Alex/LSTM/code/github/anvita/checkpoint/model_epoch_99.hdf5'
-    
-    main(inputfile, sessname='test', epochs=100, sample=3000, train=True, dropout=0.2, layers=3, cv=10)
+    main(FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
+         layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
+         temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.tain, modfile=FLAGS.modfile, cv=FLAGS.cv,
+         window=FLAGS.window)
