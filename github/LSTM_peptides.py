@@ -35,7 +35,7 @@ flags.DEFINE_integer("epochs", 25, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_integer("neurons", 256, "number of units per layer")
-flags.DEFINE_integer("sample", 5, "number of sequences to sample after every epoch.")
+flags.DEFINE_integer("sample", 5, "number of sequences to sample training")
 flags.DEFINE_float("temp", 0.8, "temperature used for sampling")
 flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
@@ -467,5 +467,5 @@ def main(infile, sessname, window=0, neurons=256, layers=2, epochs=10, batchsize
 if __name__ == "__main__":
     main(FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
-         temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.tain, modfile=FLAGS.modfile, cv=FLAGS.cv,
+         temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile, cv=FLAGS.cv,
          window=FLAGS.window)
