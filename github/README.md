@@ -23,7 +23,6 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - file containing training data with one sequence per line
 - `run_name`
   - name for all generated data; a new directory will be created with this name
-
 - `batch_size` *(OPTIONAL, default=128)*
   - Batch size to use by the model.
 - `epochs` *(OPTIONAL, default=25)*
@@ -53,6 +52,10 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
 
 ### Example: sampling 100 sequences from a pre-trained model
 ``` python
-python LSTM_peptides.py --run_name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --train 
-False --sample 100
+python LSTM_peptides.py --run_name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --train False --sample 100
+```
+
+### Example: training a 2-layer model on new sequences for 100 epochs
+``` python
+python LSTM_peptides.py --run_name train100 --dataset new_sequences.csv --layers 2 --epochs 100
 ```
