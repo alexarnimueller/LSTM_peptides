@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2017 Alex Müller, ETH Zürich.
+Copyright (c) 2017 Alex Müller, Gisbert Schneider, ETH Zürich.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,6 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+If you use this software for scientific publication, please cite the following reference:
+A. T. Müller, J. A. Hiss, G. Schneider, 2017, Recurrent Neural Network Model for Constructive Peptide Design.

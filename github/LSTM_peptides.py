@@ -123,6 +123,22 @@ def onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
             return result
 
 
+def sample_with_temp(preds, temp=1.):
+    """Sample one letter with a given temperature. For that, the softmax results by the network are reverted,
+    divided by a temperature and transformed back into probabilities through a binomial distribution.
+
+    :param preds: {np.array} predictions returned by the network
+    :param temp: {float} temperature value to sample at.
+    :return: most probable letter
+    """
+    preds = np.asarray(preds).astype('float64')
+    preds = np.log(preds) / temp
+    exp_preds = np.exp(preds)
+    preds = exp_preds / np.sum(exp_preds)
+    probas = np.random.multinomial(1, preds, 1)
+    return np.argmax(probas)
+    
+    
 class SequenceHandler(object):
     """
     Class for handling peptide sequences, e.g. one-hot encoding or decoding
@@ -199,6 +215,7 @@ class SequenceHandler(object):
             
             self.X = np.reshape(self.X, (len(self.X), window, len(self.vocab)))
             self.y = np.reshape(self.y, (self.X.shape[0], 1, self.X.shape[2]))
+        print("\nData shape: " + str(self.X.shape))
 
     def analyze_generated(self):
         """Method to analyze the generated sequences located in `self.generated`.
@@ -428,7 +445,7 @@ class Model(object):
             while sequence[-1] != ' ' and len(sequence) <= maxlen:
                 x, _, _ = onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
-                next_aa = self.sample_with_temp(preds, temp=temp)
+                next_aa = sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
             if show:
                 print(sequence)
@@ -437,21 +454,6 @@ class Model(object):
             else:
                 sampled.append(sequence[:-1])
         return sampled
-    
-    def sample_with_temp(self, preds, temp=1.):
-        """Sample one letter with a given temperature. For that, the softmax results by the network are reverted,
-        divided by a temperature and transformed back into probabilities through a binomial distribution.
-        
-        :param preds: {np.array} predictions returned by the network
-        :param temp: {float} temperature value to sample at.
-        :return: most probable letter
-        """
-        preds = np.asarray(preds).astype('float64')
-        preds = np.log(preds) / temp
-        exp_preds = np.exp(preds)
-        preds = exp_preds / np.sum(exp_preds)
-        probas = np.random.multinomial(1, preds, 1)
-        return np.argmax(probas)
     
     def load_model(self, filename):
         """Function to load a trained model from a hdf5 file
@@ -463,6 +465,7 @@ class Model(object):
 
 def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, valsplit=0.2, sample=10,
          aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.001, modfile=None, samplelength=36, cv=None):
+    
     # loading sequence data and encoding it
     data = SequenceHandler()
     data.load_sequences(infile)
@@ -475,7 +478,6 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     
     # one-hot encode padded sequences
     data.one_hot_encode(window=window, step=step)
-    print("Data shape: " + str(data.X.shape))
     
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
@@ -492,8 +494,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
             # training model on data
             print("\nTRAINING MODEL...\n")
             model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
-            # plot loss
-            model.plot_losses()
+            model.plot_losses()  # plot loss
     
     else:
         print("\nUSING PRETRAINED MODEL... (%s)\n" % modfile)
