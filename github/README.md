@@ -41,7 +41,9 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - Fraction of dropout to apply to the network. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout 
   etc.
 - `train` *(OPTIONAL, default=True)*
-  - Whether to train the model (`True`) or just sample from a pre-trained model (`False`). 
+  - Whether to train the model (`True`) or just sample from a pre-trained model (`False`).
+- `lr` *(OPTIONAL, default=0.001)*
+  - Learning rate to be used for Adam optimizer.
 - `modfile` *(OPTIONAL, default=None)*
   - If `train=False`, a pre-trained model file needs to be provided.
 - `cv` *(OPTIONAL, default=None)*

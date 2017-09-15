@@ -12,15 +12,17 @@ import random
 import matplotlib
 import numpy as np
 import tensorflow as tf
+from keras.callbacks import ModelCheckpoint
 from keras.initializers import RandomNormal
 from keras.layers import Dense, LSTM, BatchNormalization, TimeDistributed
 from keras.models import Sequential
-from keras.callbacks import ModelCheckpoint
+from keras.optimizers import Adam
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
 
 sess = tf.Session()
 from keras import backend as K
+
 K.set_session(sess)
 
 matplotlib.use("Agg")
@@ -35,12 +37,16 @@ flags.DEFINE_integer("epochs", 25, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_integer("neurons", 256, "number of units per layer")
-flags.DEFINE_integer("sample", 5, "number of sequences to sample training")
+flags.DEFINE_integer("sample", 10, "number of sequences to sample training")
+flags.DEFINE_integer("maxlen", 36, "maximum sequence length allowed when sampling new sequences")
 flags.DEFINE_float("temp", 0.8, "temperature used for sampling")
+flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
 flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
+flags.DEFINE_float("lr", 0.001, "learning rate to be used with the Adam optimizer")
 flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
 flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
+flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
 flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
                                   "longest sequence length in the dataset")
 
@@ -56,7 +62,7 @@ def onehotencode(s, vocab=None):
     """
     if not vocab:
         vocab = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'K', 'L', 'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'W',
-                 'Y', 'Z', ' ']  # B = begin toke, Z = end token, ' ' = padding token
+                 'Y', ' ']
     
     # generate translation dictionary for one-hot encoding
     to_one_hot = dict()
@@ -124,6 +130,7 @@ class SequenceHandler(object):
     
     def __init__(self):
         self.sequences = None
+        self.generated = None
         self.X = list()
         self.y = list()
         # generate translation dictionary for one-hot encoding
@@ -151,7 +158,7 @@ class SequenceHandler(object):
             length = max([len(seq) for seq in self.sequences])
             padded_seqs = []
             for seq in self.sequences:
-                padded_seq = 'B' + seq + pad_char * (length - len(seq)) + 'Z'
+                padded_seq = 'B' + seq + pad_char * (length - len(seq))
                 padded_seqs.append(padded_seq)
         
         else:
@@ -193,14 +200,36 @@ class SequenceHandler(object):
             self.X = np.reshape(self.X, (len(self.X), window, len(self.vocab)))
             self.y = np.reshape(self.y, (self.X.shape[0], 1, self.X.shape[2]))
 
+    def analyze_generated(self):
+        """Method to analyze the generated sequences located in `self.generated`.
+        
+        :return:
+        """
+        count = 0
+        print("Nr. of duplicates in generated sequences: %i" % (len(self.generated) - len(set(self.generated))))
+        for g in set(self.generated):
+            if g in self.sequences:
+                count += 1
+        print("%.2f percent of generated sequences are present in the training data." % (count / len(self.generated)))
+    
+    def save_generated(self, filename):
+        """Save all sequences in `self.generated` to file
+        
+        :param filename: {str} filename to save the sequences to
+        :return: saved file
+        """
+        with open(filename, 'w') as f:
+            for s in self.generated:
+                f.write(s + '\n')
+        
 
 class Model(object):
     """
     Class containing the LSTM model to learn sequential data
     """
     
-    def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2,
-                 loss='categorical_crossentropy', optimizer='adam', dropoutfract=0.1, seed=1749):
+    def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2, lr=0.001,
+                 loss='categorical_crossentropy', dropoutfract=0.1, seed=1749):
         """Initialize the model
         
         :param n_vocab: {int} length of vocabulary
@@ -211,12 +240,14 @@ class Model(object):
         :param batch: {int} batch size
         :param layers: {int} number of layers in the network
         :param loss: {str} applied loss function, choose from available keras loss functions
-        :param optimizer: {str} used optimizer, choose from available keras optimizers
+        :param lr: {float} learning rate to use with Adam optimizer
         :param dropoutfract: {float} fraction of dropout to add to each layer. Layer1 gets 1 * value, Layer2 2 *
         value and so on.
         :param seed {int} random seed used to initialize weights
         """
-        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # init weights randomly -0.05 and 0.05
+        random.seed(seed)
+        self.seed = seed
+        self.weight_init = None
         self.dropout = dropoutfract
         self.inshape = (None, n_vocab)
         self.outshape = outshape
@@ -231,7 +262,7 @@ class Model(object):
         self.cv_val_loss_std = None
         self.model = None
         self.losstype = loss
-        self.optimizer = optimizer
+        self.optimizer = Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         self.session_name = session_name
         self.logdir = './' + session_name
         if os.path.exists(self.logdir):
@@ -244,14 +275,15 @@ class Model(object):
             os.makedirs(self.checkpointdir)
         _, _, self.vocab = onehotencode('A')
         
-        self.initialize_model()
-        
-    def initialize_model(self):
+        self.initialize_model(self.seed)
+    
+    def initialize_model(self, seed=1749):
         """Method to initialize the model with all parameters saved in the attributes. This method is used during
         initialization of the class, as well as in cross-validation to reinitialize a fresh model for every fold.
         
         :return: initialized model in ``self.model``
         """
+        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # init weights randomly -0.05 and 0.05
         self.model = Sequential()
         self.model.add(BatchNormalization(input_shape=self.inshape, name='BatchNorm'))
         for l in range(self.layers):
@@ -265,35 +297,40 @@ class Model(object):
         self.model.add(TimeDistributed(Dense(self.outshape, activation='softmax', name='Dense')))
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
     
-    def train(self, X, y, epochs=10, valsplit=0.2, sample=5):
+    def train(self, x, y, epochs=10, valsplit=0.2, sample=10):
         """Train the model on given training data.
         
-        :param X: {array} training data
+        :param x: {array} training data
         :param y: {array} targets for training data in X
         :param epochs: {int} number of epochs to train
         :param valsplit: {float} fraction of data that should be used as validation data during training
         :param sample: {int} number of sequences to sample after every training epoch
         :return: trained model and measured losses in self.model, self.losses and self.val_losses
         """
+        writer = tf.summary.FileWriter('./logs/' + self.session_name, graph=sess.graph)
         for e in range(epochs):
-            writer = tf.summary.FileWriter('./logs/' + self.session_name, graph=sess.graph)
-            checkpoint = ModelCheckpoint(filepath=self.checkpointdir + 'model_epoch_%i.hdf5' % e, verbose=1)
-            train_history = self.model.fit(X, y, epochs=1, batch_size=self.batchsize, validation_split=valsplit,
-                                           shuffle=False, callbacks=[checkpoint])
+            print("Epoch %i" % e)
+            checkpoints = [ModelCheckpoint(filepath=self.checkpointdir + 'model_epoch_%i.hdf5' % e, verbose=0)]
+            train_history = self.model.fit(x, y, epochs=1, batch_size=self.batchsize, validation_split=valsplit,
+                                           shuffle=False, callbacks=checkpoints)
             loss_sum = tf.Summary(value=[tf.Summary.Value(tag="loss", simple_value=train_history.history['loss'][-1])])
             writer.add_summary(loss_sum, e)
             
             self.losses.append(train_history.history['loss'])
             if valsplit > 0.:
                 self.val_losses.append(train_history.history['val_loss'])
+                val_loss_sum = tf.Summary(value=[tf.Summary.Value(tag="val_loss", simple_value=train_history.history[
+                    'val_loss'][-1])])
+                writer.add_summary(val_loss_sum, e)
             if sample:
-                for s in self.sample(sample):  # sample 5 sequences after every training epoch
+                for s in self.sample(sample):  # sample sequences after every training epoch
                     print(s)
+        writer.close()
     
-    def cross_val(self, X, y, epochs=10, cv=5, plot=True):
-        """Method to perform crossvalidation with the model given data X, y
+    def cross_val(self, x, y, epochs=10, cv=5, plot=True):
+        """Method to perform cross-validation with the model given data X, y
         
-        :param X: {array} training data
+        :param x: {array} training data
         :param y: {array} targets for training data in X
         :param epochs: {int} number of epochs to train
         :param cv: {int} fold
@@ -304,11 +341,11 @@ class Model(object):
         self.val_losses = list()
         kf = KFold(n_splits=cv)
         cntr = 0
-        for train, test in kf.split(X):
+        for train, test in kf.split(x):
             print("\nFold %i" % (cntr + 1))
-            self.initialize_model()  # reinitialize a new model every fold, otherwise it will "remember" previous data
-            train_history = self.model.fit(X[train], y[train], epochs=epochs, batch_size=self.batchsize,
-                                           validation_data=(X[test], y[test]))
+            self.initialize_model(seed=cntr)  # reinitialize every fold, otherwise it will "remember" previous data
+            train_history = self.model.fit(x[train], y[train], epochs=epochs, batch_size=self.batchsize,
+                                           validation_data=(x[test], y[test]))
             self.losses.append(train_history.history['loss'])
             self.val_losses.append(train_history.history['val_loss'])
             cntr += 1
@@ -318,8 +355,8 @@ class Model(object):
         self.cv_val_loss_std = np.std(self.val_losses, axis=0)
         if plot:
             self.plot_losses(cv=True)
-        print("\n%i-th epoch's %i-fold cross-validation loss: %.4f ± %.4f" % (epochs, cv, self.cv_val_loss[-1],
-                                                                              self.cv_val_loss_std[-1]))
+        print("\n%i-th epoch's %i-fold cross-validation loss: %.4f ± %.4f" %
+              (epochs, cv, self.cv_val_loss[-1], self.cv_val_loss_std[-1]))
     
     def plot_losses(self, show=False, cv=False):
         """Plot the losses obtained in training.
@@ -333,7 +370,7 @@ class Model(object):
         fig, ax = plt.subplots()
         ax.set_title('LSTM Categorical Crossentropy Loss Plot', fontweight='bold', fontsize=16)
         if cv:
-            fname = self.logdir + '/cv_loss_plot.pdf'
+            filename = self.logdir + '/' + self.session_name + '_cv_loss_plot.pdf'
             x = range(1, len(self.cv_loss) + 1)
             ax.plot(x, self.cv_loss, '-', color='#FE4365', label='Training')
             ax.plot(x, self.cv_val_loss, '-', color='k', label='Validation')
@@ -342,8 +379,11 @@ class Model(object):
             ax.fill_between(x, self.cv_val_loss + self.cv_val_loss_std, self.cv_val_loss - self.cv_val_loss_std,
                             facecolors='k', alpha=0.5)
             ax.set_xlim([0.5, len(self.cv_loss) + 0.5])
+            minloss = np.min(self.cv_val_loss)
+            plt.text(x=0.5, y=0.5, s='best epoch: ' + str(np.where(minloss == self.cv_val_loss)[0][0]) + ', val_loss: '
+                                     + str(minloss.round(4)), transform=ax.transAxes)
         else:
-            fname = self.logdir + '/loss_plot.pdf'
+            filename = self.logdir + '/' + self.session_name + '_loss_plot.pdf'
             x = range(1, len(self.losses) + 1)
             ax.plot(x, self.losses, '-', color='#FE4365', label='Training')
             if self.val_losses:
@@ -359,7 +399,7 @@ class Model(object):
         if show:
             plt.show()
         else:
-            plt.savefig(fname)
+            plt.savefig(filename)
     
     def sample(self, num=10, maxlen=50, start=None, temp=1., show=False):
         """Invoke generation of sequence patterns through sampling from the trained model.
@@ -380,21 +420,24 @@ class Model(object):
         for rs in pbar(range(num)):
             random.seed = rs
             if start:
-                start_seq = start
+                start_aa = start
             else:  # generate random starting letter
-                start_seq = 'B'
-            sequence = start_seq  # start with starting letter
+                start_aa = 'B'
+            sequence = start_aa  # start with starting letter
             
-            while sequence[-1] != 'Z' and len(sequence) <= maxlen:
+            while sequence[-1] != ' ' and len(sequence) <= maxlen:
                 x, _, _ = onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
                 next_aa = self.sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
             if show:
                 print(sequence)
-            sampled.append(sequence[1:-1])
+            if start_aa == 'B':
+                sampled.append(sequence[1:-1])
+            else:
+                sampled.append(sequence[:-1])
         return sampled
-
+    
     def sample_with_temp(self, preds, temp=1.):
         """Sample one letter with a given temperature. For that, the softmax results by the network are reverted,
         divided by a temperature and transformed back into probabilities through a binomial distribution.
@@ -416,11 +459,10 @@ class Model(object):
         :return: model loaded from file in ``self.model``
         """
         self.model.load_weights(filename)
-        
 
-def main(infile, sessname, window=0, neurons=256, layers=2, epochs=10, batchsize=64, valsplit=0.2,
-         sample=10, temperature=0.8, dropout=0.1, train=True, modfile=None, cv=None):
-    
+
+def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, valsplit=0.2, sample=10,
+         aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.001, modfile=None, samplelength=36, cv=None):
     # loading sequence data and encoding it
     data = SequenceHandler()
     data.load_sequences(infile)
@@ -432,40 +474,41 @@ def main(infile, sessname, window=0, neurons=256, layers=2, epochs=10, batchsize
         data.pad_sequences(padlen=False)
     
     # one-hot encode padded sequences
-    data.one_hot_encode(window=window)
+    data.one_hot_encode(window=window, step=step)
+    print("Data shape: " + str(data.X.shape))
     
     # building the LSTM model
-    model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname,
-                  n_units=neurons, batch=batchsize, layers=layers, loss='categorical_crossentropy',
-                  optimizer='adam', dropoutfract=dropout, seed=1749)
+    model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
+                  batch=batchsize, layers=layers, loss='categorical_crossentropy', lr=learningrate,
+                  dropoutfract=dropout, seed=1749)
     
     if train:
         if cv:
             print("\nPERFORMING %i-FOLD CROSS-VALIDATION...\n" % cv)
             model.cross_val(data.X, data.y, epochs=epochs, cv=cv)
             model.initialize_model()
-            model.train(data.X, data.y, epochs=epochs, valsplit=valsplit)
+            model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
         else:
             # training model on data
             print("\nTRAINING MODEL...\n")
             model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
             # plot loss
             model.plot_losses()
-        
+    
     else:
         print("\nUSING PRETRAINED MODEL... (%s)\n" % modfile)
         model.load_model(modfile)
     
-    # generating new data
+    # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
-    gen = model.sample(sample, maxlen=36, show=False, temp=temperature)  # sampling sequences after final epoch
-    with open(model.logdir + '/sampled_sequences.csv', 'w') as f:
-        for s in gen:
-            f.write(s + '\n')
+    data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
+    data.analyze_generated()
+    data.save_generated(model.logdir + '/sampled_sequences.csv')
 
 
 if __name__ == "__main__":
     main(FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
-         temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile, cv=FLAGS.cv,
-         window=FLAGS.window)
+         temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
+         learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
+         step=FLAGS.step, aa=FLAGS.startchar)
