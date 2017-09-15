@@ -37,9 +37,11 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - Number of sequences to sample from the model after training.
 - `temp` *(OPTIONAL, default=0.8)*
   - Temperature to use for sampling.
+- `maxlen` *(OPTIONAL, default=48)*
+  - Maximum sequence length allowed when sampling new sequences
 - `dropout` *(OPTIONAL, default=0.1)*
-  - Fraction of dropout to apply to the network. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout 
-  etc.
+  - Fraction of dropout to apply to the network. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout
+   etc.
 - `train` *(OPTIONAL, default=True)*
   - Whether to train the model (`True`) or just sample from a pre-trained model (`False`).
 - `lr` *(OPTIONAL, default=0.001)*
@@ -51,6 +53,9 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
 - `window` *(OPTIONAL, default=0)*
   - Size of window to use for enhancing training data by sliding-windows. If 0, all sequences are padded to the 
   length of the longest sequence in the data set.
+- `step` *(OPTIONAL, default=1)*
+  - Step size to move the sliding window or the prediction target
+
 
 ### Example: sampling 100 sequences from a pre-trained model
 ``` python
