@@ -61,6 +61,9 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   length of the longest sequence in the data set.
 - `step` *(OPTIONAL, default=1)*
   - Step size to move the sliding window or the prediction target
+- `target` *(OPTIONAL, default='all')*
+  - whether to learn all proceeding characters or just the last 'one' in sequence
+
 
 
 ### Example: sampling 100 sequences from a pre-trained model
