@@ -20,7 +20,7 @@ from keras.models import Sequential
 from keras.optimizers import Adam
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
-from modlamp.descriptors import PeptideDescriptor
+from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
 
 sess = tf.Session()
 from keras import backend as K
@@ -227,9 +227,25 @@ class SequenceHandler(object):
             self.y = np.reshape(self.y, (self.X.shape[0], 1, self.X.shape[2]))
         print("\nData shape: " + str(self.X.shape))
 
-    def analyze_generated(self):
+    def analyze_training(self):
+        """Method to analyze the distribution of the training data
+        
+        :return: prints out information about the length distribution of the sequences in ``self.sequences``
+        """
+        d = GlobalDescriptor(self.sequences)
+        d.length()
+        print("\nLENGTH DISTRIBUTION OF TRAINING DATA:\n")
+        print("Mean sequence length: %.1f ± %.1f" % (np.mean(d.descriptor), np.std(d.descriptor)))
+        print("Median sequence length: %i" % np.median(d.descriptor))
+        print("Minimal sequence length: %i" % np.min(d.descriptor))
+        print("Maximal sequence length: %i" % np.max(d.descriptor))
+    
+    def analyze_generated(self, distances=True):
         """Method to analyze the generated sequences located in `self.generated`.
         
+        :param distances: {bool} whether distances in descriptor space should comparing sampled and training
+        molecules should be calculated.
+        sampled
         :return:
         """
         count = 0
@@ -243,10 +259,12 @@ class SequenceHandler(object):
         seq_desc.calculate_autocorr(7)
         gen_desc = PeptideDescriptor(self.generated, 'PPCALI')
         gen_desc.calculate_autocorr(7)
-        distances = ['euclidean', 'cosine']
-        for dist in distances:
-            desc_dist = distance.cdist(seq_desc.descriptor, gen_desc.descriptor, metric=dist)
-            print("\tAverage %s distance in PPCALI descriptor space:\t%.4f" % (dist, desc_dist))
+        if distances:
+            distancemetrics = ['euclidean']  # , 'cosine']
+            for dist in distancemetrics:
+                print("Calculating distances...")
+                desc_dist = distance.cdist(seq_desc.descriptor, gen_desc.descriptor, metric=dist)
+                print("\tAverage %s distance in PPCALI descriptor space:\t%.4f" % (dist, np.mean(desc_dist)))
     
     def save_generated(self, filename):
         """Save all sequences in `self.generated` to file
@@ -486,9 +504,10 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
          valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.001, modfile=None,
          samplelength=36, cv=None):
     
-    # loading sequence data and encoding it
+    # loading sequence data, analyze, pad and encode it
     data = SequenceHandler()
     data.load_sequences(infile)
+    data.analyze_training()
     
     # pad sequences
     if window != 0:
@@ -502,7 +521,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
                   batch=batchsize, layers=layers, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, seed=1749)
+                  dropoutfract=dropout, seed=42)
     
     if train:
         if cv:
@@ -523,7 +542,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
-    data.analyze_generated()
+    #data.analyze_generated(distances=False)
     data.save_generated(model.logdir + '/sampled_sequences.csv')
 
 
