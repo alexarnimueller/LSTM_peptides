@@ -12,7 +12,13 @@ The code relies on the keras package by Chollet and others (https://github.com/f
  - LICENSE: MIT opensource license
 
 ## How To Use
-First, install all requirements (in `requirements.txt`). Then run the model as follows:
+First, install all requirements (in `requirements.txt`). In this folder, type: 
+
+``` python
+pip install -r requirements.txt
+```
+
+Then run the model as follows:
 
 ``` python
 python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME  $FURTHER_OPTIONAL_PARAMETERS

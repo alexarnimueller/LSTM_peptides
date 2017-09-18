@@ -4,7 +4,7 @@
 ..date:: September 2017
 
 Code for training a LSTM model on peptide sequences followed by sampling novel sequences through the model.
-Change the filenames at the end of the script to adapt it to your needs.
+Check the readme for possible flags to use with this script.
 """
 import os
 import random
@@ -12,6 +12,7 @@ import random
 import matplotlib
 import numpy as np
 import tensorflow as tf
+from scipy.spatial import distance
 from keras.callbacks import ModelCheckpoint
 from keras.initializers import RandomNormal
 from keras.layers import Dense, LSTM, BatchNormalization, TimeDistributed
@@ -19,6 +20,7 @@ from keras.models import Sequential
 from keras.optimizers import Adam
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
+from modlamp.descriptors import PeptideDescriptor
 
 sess = tf.Session()
 from keras import backend as K
@@ -47,6 +49,7 @@ flags.DEFINE_float("lr", 0.001, "learning rate to be used with the Adam optimize
 flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
 flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
 flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
+flags.DEFINE_string("target", "all", "whether to learn all proceeding characters or just the last `one` in sequence")
 flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
                                   "longest sequence length in the dataset")
 
@@ -141,7 +144,7 @@ def sample_with_temp(preds, temp=1.):
     
 class SequenceHandler(object):
     """
-    Class for handling peptide sequences, e.g. one-hot encoding or decoding
+    Class for handling peptide sequences, e.g. loading, one-hot encoding or decoding and saving
     """
     
     def __init__(self):
@@ -188,19 +191,23 @@ class SequenceHandler(object):
         
         self.sequences = padded_seqs  # overwrite sequences with padded sequences
     
-    def one_hot_encode(self, window=0, step=2):
+    def one_hot_encode(self, window=0, step=2, target='all'):
         """Chop up loaded sequences into patterns of length ``window`` by moving by stepsize ``step`` and translate
         them with a one-hot vector encoding
         
         :param window: {int} size of window to move over the sequences in ``self.sequences``. If ``window=0``,
         the whole sequence length is processed. This is needed if the sequences are all padded to the same length.
         :param step: {int} size of the steps to move the window forward
+        :param target: {str} whether all proceeding AA should be learned or just the last one in sequence (`all`, `one`)
         :return: one-hot encoded sequence patterns in self.X and corresponding target amino acids in self.y
         """
         if window == 0:
             for s in self.sequences:
                 self.X.append([self.to_one_hot[char] for char in s[:-step]])
-                self.y.append([self.to_one_hot[char] for char in s[step:]])
+                if target == 'all':
+                    self.y.append([self.to_one_hot[char] for char in s[step:]])
+                elif target == 'one':
+                    self.y.append(s[-step:])
             
             self.X = np.reshape(self.X, (len(self.X), len(self.sequences[0]) - step, len(self.vocab)))
             self.y = np.reshape(self.y, (len(self.y), len(self.sequences[0]) - step, len(self.vocab)))
@@ -211,7 +218,10 @@ class SequenceHandler(object):
                     seq_in = s[i: i + window]  # training data (-> X)
                     seq_out = s[i + window]  # target data (-> y)
                     self.X.append([self.to_one_hot[char] for char in seq_in])
-                    self.y.append(self.to_one_hot[seq_out])
+                    if target == 'all':
+                        self.y.append(self.to_one_hot[seq_out])
+                    elif target == 'one':
+                        self.y.append(s[-step:])
             
             self.X = np.reshape(self.X, (len(self.X), window, len(self.vocab)))
             self.y = np.reshape(self.y, (self.X.shape[0], 1, self.X.shape[2]))
@@ -223,11 +233,20 @@ class SequenceHandler(object):
         :return:
         """
         count = 0
-        print("Nr. of duplicates in generated sequences: %i" % (len(self.generated) - len(set(self.generated))))
+        print("\nNr. of duplicates in generated sequences: %i" % (len(self.generated) - len(set(self.generated))))
         for g in set(self.generated):
             if g in self.sequences:
                 count += 1
         print("%.2f percent of generated sequences are present in the training data." % (count / len(self.generated)))
+        
+        seq_desc = PeptideDescriptor(self.sequences, 'PPCALI')
+        seq_desc.calculate_autocorr(7)
+        gen_desc = PeptideDescriptor(self.generated, 'PPCALI')
+        gen_desc.calculate_autocorr(7)
+        distances = ['euclidean', 'cosine']
+        for dist in distances:
+            desc_dist = distance.cdist(seq_desc.descriptor, gen_desc.descriptor, metric=dist)
+            print("\tAverage %s distance in PPCALI descriptor space:\t%.4f" % (dist, desc_dist))
     
     def save_generated(self, filename):
         """Save all sequences in `self.generated` to file
@@ -463,8 +482,9 @@ class Model(object):
         self.model.load_weights(filename)
 
 
-def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, valsplit=0.2, sample=10,
-         aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.001, modfile=None, samplelength=36, cv=None):
+def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, target='all',
+         valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.001, modfile=None,
+         samplelength=36, cv=None):
     
     # loading sequence data and encoding it
     data = SequenceHandler()
@@ -512,4 +532,4 @@ if __name__ == "__main__":
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
          learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
-         step=FLAGS.step, aa=FLAGS.startchar)
+         step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target)
