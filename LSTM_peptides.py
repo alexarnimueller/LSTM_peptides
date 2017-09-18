@@ -21,6 +21,8 @@ from keras.optimizers import Adam
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
+from modlamp.sequences import Random, Helices
+from modlamp.core import count_aas
 
 sess = tf.Session()
 from keras import backend as K
@@ -35,28 +37,43 @@ flags = tf.app.flags
 flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
 flags.DEFINE_string("run_name", "test", "run name for log and checkpoint files")
 flags.DEFINE_integer("batch_size", 128, "batch size")
-flags.DEFINE_integer("epochs", 25, "epochs to train")
+flags.DEFINE_integer("epochs", 50, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
-flags.DEFINE_integer("neurons", 256, "number of units per layer")
-flags.DEFINE_integer("sample", 10, "number of sequences to sample training")
+flags.DEFINE_integer("neurons", 128, "number of units per layer")
+flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
 flags.DEFINE_integer("maxlen", 48, "maximum sequence length allowed when sampling new sequences")
-flags.DEFINE_float("temp", 0.8, "temperature used for sampling")
+flags.DEFINE_float("temp", 1.5, "temperature used for sampling")
 flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
-flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
+flags.DEFINE_float("dropout", 0.2, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
-flags.DEFINE_float("lr", 0.001, "learning rate to be used with the Adam optimizer")
+flags.DEFINE_float("lr", 0.01, "learning rate to be used with the Adam optimizer")
 flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
 flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
 flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
 flags.DEFINE_string("target", "all", "whether to learn all proceeding characters or just the last `one` in sequence")
+flags.DEFINE_integer("padlen", 0, "number of spaces to use for padding sequences (if window not 0); if 0, sequences are"
+                                  " padded to the length of the longest sequence in the dataset")
 flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
                                   "longest sequence length in the dataset")
+flags.DEFINE_bool("distance", True, "distance calculation of sampled vs. training sequences in descriptor space")
 
 FLAGS = flags.FLAGS
 
 
-def onehotencode(s, vocab=None):
+def _save_flags(flags, filename):
+    """Function to save used tf.FLAGS to log-file
+
+    :param flags: tensorflow flags
+    :return: saved file
+    """
+    with open(filename, 'w') as f:
+        f.write("Used flags:\n-----------\n")
+        for k, v in flags.__dict__['__flags'].items():
+            f.write(k + ": " + str(v) + "\n")
+
+
+def _onehotencode(s, vocab=None):
     """Function to one-hot encode a sring.
     
     :param s: {str} String to encode in one-hot fashion
@@ -81,7 +98,7 @@ def onehotencode(s, vocab=None):
     return np.reshape(result, (1, result.shape[0], result.shape[1])), to_one_hot, vocab
 
 
-def onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
+def _onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
     """Decode a given one-hot represented matrix back into sequences
 
     :param matrix: matrix containing sequence patterns that are one-hot encoded
@@ -92,7 +109,7 @@ def onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
     :return: list of decoded sequences in the range lenmin-lenmax, if ``filename``, they are saved to a file
     """
     if not vocab:
-        _, _, vocab = onehotencode('A')
+        _, _, vocab = _onehotencode('A')
     if len(matrix.shape) == 2:  # if a matrix containing only one string is supplied
         result = []
         for i in range(matrix.shape[0]):
@@ -126,7 +143,7 @@ def onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
             return result
 
 
-def sample_with_temp(preds, temp=1.):
+def _sample_with_temp(preds, temp=1.):
     """Sample one letter with a given temperature. For that, the softmax results by the network are reverted,
     divided by a temperature and transformed back into probabilities through a binomial distribution.
 
@@ -147,13 +164,17 @@ class SequenceHandler(object):
     Class for handling peptide sequences, e.g. loading, one-hot encoding or decoding and saving
     """
     
-    def __init__(self):
+    def __init__(self, window=0):
+        """
+        :param window: {str} window used for chopping up sequences. If 0: False
+        """
         self.sequences = None
         self.generated = None
         self.X = list()
         self.y = list()
+        self.window = window
         # generate translation dictionary for one-hot encoding
-        _, self.to_one_hot, self.vocab = onehotencode('A')
+        _, self.to_one_hot, self.vocab = _onehotencode('A')
     
     def load_sequences(self, filename):
         """Method to load peptide sequences from a csv file
@@ -171,19 +192,22 @@ class SequenceHandler(object):
         
         :param pad_char: {str} Character to pad sequences with
         :param padlen: {int} Custom length of padding to add to all sequences to (optional), default: 0. If
-        ``False``, sequences are padded to the length of the longest sequence in the training set.
+        0, sequences are padded to the length of the longest sequence in the training set. If a window is used and the
+        padded sequence is shorter than the window size, it is padded to fit the window.
         """
-        if not padlen:
+        if padlen:
+            padded_seqs = []
+            for seq in self.sequences:
+                if len(seq) < self.window:
+                    padded_seq = seq + pad_char * (1 + self.window - len(seq))
+                else:
+                    padded_seq = seq + pad_char * padlen
+                padded_seqs.append(padded_seq)
+        else:
             length = max([len(seq) for seq in self.sequences])
             padded_seqs = []
             for seq in self.sequences:
                 padded_seq = 'B' + seq + pad_char * (length - len(seq))
-                padded_seqs.append(padded_seq)
-        
-        else:
-            padded_seqs = []
-            for seq in self.sequences:
-                padded_seq = seq + pad_char * padlen
                 padded_seqs.append(padded_seq)
         
         if pad_char not in self.vocab:
@@ -191,17 +215,15 @@ class SequenceHandler(object):
         
         self.sequences = padded_seqs  # overwrite sequences with padded sequences
     
-    def one_hot_encode(self, window=0, step=2, target='all'):
+    def one_hot_encode(self, step=2, target='all'):
         """Chop up loaded sequences into patterns of length ``window`` by moving by stepsize ``step`` and translate
         them with a one-hot vector encoding
         
-        :param window: {int} size of window to move over the sequences in ``self.sequences``. If ``window=0``,
-        the whole sequence length is processed. This is needed if the sequences are all padded to the same length.
         :param step: {int} size of the steps to move the window forward
         :param target: {str} whether all proceeding AA should be learned or just the last one in sequence (`all`, `one`)
         :return: one-hot encoded sequence patterns in self.X and corresponding target amino acids in self.y
         """
-        if window == 0:
+        if self.window == 0:
             for s in self.sequences:
                 self.X.append([self.to_one_hot[char] for char in s[:-step]])
                 if target == 'all':
@@ -214,18 +236,17 @@ class SequenceHandler(object):
         
         else:
             for s in self.sequences:
-                for i in range(0, len(s) - window - 1, step):
-                    seq_in = s[i: i + window]  # training data (-> X)
-                    seq_out = s[i + window]  # target data (-> y)
-                    self.X.append([self.to_one_hot[char] for char in seq_in])
+                for i in range(0, len(s) - self.window, step):
+                    self.X.append([self.to_one_hot[char] for char in s[i: i + self.window]])
                     if target == 'all':
-                        self.y.append(self.to_one_hot[seq_out])
+                        self.y.append([self.to_one_hot[char] for char in s[i + 1: i + self.window + 1]])
                     elif target == 'one':
                         self.y.append(s[-step:])
             
-            self.X = np.reshape(self.X, (len(self.X), window, len(self.vocab)))
-            self.y = np.reshape(self.y, (self.X.shape[0], 1, self.X.shape[2]))
-        print("\nData shape: " + str(self.X.shape))
+            self.X = np.reshape(self.X, (len(self.X), self.window, len(self.vocab)))
+            self.y = np.reshape(self.y, (len(self.y), self.window, len(self.vocab)))
+
+        print("\nData shape:\nX: " + str(self.X.shape) + "\ny: " + str(self.y.shape))
 
     def analyze_training(self):
         """Method to analyze the distribution of the training data
@@ -235,10 +256,11 @@ class SequenceHandler(object):
         d = GlobalDescriptor(self.sequences)
         d.length()
         print("\nLENGTH DISTRIBUTION OF TRAINING DATA:\n")
-        print("Mean sequence length: %.1f ± %.1f" % (np.mean(d.descriptor), np.std(d.descriptor)))
-        print("Median sequence length: %i" % np.median(d.descriptor))
-        print("Minimal sequence length: %i" % np.min(d.descriptor))
-        print("Maximal sequence length: %i" % np.max(d.descriptor))
+        print("Number of sequences:    \t%i" % len(self.sequences))
+        print("Mean sequence length:   \t%.1f ± %.1f" % (np.mean(d.descriptor), np.std(d.descriptor)))
+        print("Median sequence length: \t%i" % np.median(d.descriptor))
+        print("Minimal sequence length:\t%i" % np.min(d.descriptor))
+        print("Maximal sequence length:\t%i" % np.max(d.descriptor))
     
     def analyze_generated(self, distances=True):
         """Method to analyze the generated sequences located in `self.generated`.
@@ -254,18 +276,47 @@ class SequenceHandler(object):
             if g in self.sequences:
                 count += 1
         print("%.2f percent of generated sequences are present in the training data." % (count / len(self.generated)))
-        
-        seq_desc = PeptideDescriptor(self.sequences, 'PPCALI')
-        seq_desc.calculate_autocorr(7)
-        gen_desc = PeptideDescriptor(self.generated, 'PPCALI')
-        gen_desc.calculate_autocorr(7)
+
+        d = GlobalDescriptor(self.generated)
+        d.filter_aa('B')
+        d.length()
+        print("\nLENGTH DISTRIBUTION OF GENERATED DATA:\n")
+        print("Number of valid sequences:\t%i" % len(self.generated))
+        print("Mean sequence length:     \t%.1f ± %.1f" % (np.mean(d.descriptor), np.std(d.descriptor)))
+        print("Median sequence length:   \t%i" % np.median(d.descriptor))
+        print("Minimal sequence length:  \t%i" % np.min(d.descriptor))
+        print("Maximal sequence length:  \t%i" % np.max(d.descriptor))
+
         if distances:
-            distancemetrics = ['euclidean']  # , 'cosine']
-            for dist in distancemetrics:
-                print("Calculating distances...")
-                desc_dist = distance.cdist(seq_desc.descriptor, gen_desc.descriptor, metric=dist)
+            seq_desc = PeptideDescriptor([s[1:].rstrip() for s in self.sequences], 'PPCALI')
+            seq_desc.calculate_autocorr(7)
+            gen_desc = PeptideDescriptor(d.sequences, 'PPCALI')
+            gen_desc.calculate_autocorr(7)
+
+            # random comparison set
+            ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate random seqs
+            probas = count_aas(''.join(seq_desc.sequences)).values()  # get the amino acid distribution of training seqs
+            ran.generate_sequences(proba=probas)
+            ran_desc = PeptideDescriptor(ran.sequences, 'PPCALI')
+            ran_desc.calculate_autocorr(7)
+
+            # amphipathic helices comparison set
+            hel = Helices(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))
+            hel.generate_sequences()
+            hel_desc = PeptideDescriptor(hel.sequences, 'PPCALI')
+            hel_desc.calculate_autocorr(7)
+
+            # distance calculation
+            distance_metrics = ['euclidean']  # , 'cosine']
+            for dist in distance_metrics:
+                print("\nCalculating distances...")
+                desc_dist = distance.cdist(gen_desc.descriptor, seq_desc.descriptor, metric=dist)
                 print("\tAverage %s distance in PPCALI descriptor space:\t%.4f" % (dist, np.mean(desc_dist)))
-    
+                ran_dist = distance.cdist(ran_desc.descriptor, seq_desc.descriptor, metric=dist)
+                print("\tAverage %s distance if randomly sampled seqs:\t%.4f" % (dist, np.mean(ran_dist)))
+                hel_dist = distance.cdist(hel_desc.descriptor, seq_desc.descriptor, metric=dist)
+                print("\tAverage %s distance if amphipathic helical seqs:\t%.4f" % (dist, np.mean(hel_dist)))
+
     def save_generated(self, filename):
         """Save all sequences in `self.generated` to file
         
@@ -283,7 +334,7 @@ class Model(object):
     """
     
     def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2, lr=0.001,
-                 loss='categorical_crossentropy', dropoutfract=0.1, seed=1749):
+                 loss='categorical_crossentropy', dropoutfract=0.1, seed=42):
         """Initialize the model
         
         :param n_vocab: {int} length of vocabulary
@@ -320,18 +371,18 @@ class Model(object):
         self.session_name = session_name
         self.logdir = './' + session_name
         if os.path.exists(self.logdir):
-            decision = input('\nSession folder already exists!\nDo you want to overwrite the previous session? [y/n] ')
+            decision = raw_input('\nSession folder already exists!\nDo you want to overwrite the previous session? [y/n] ')
             if decision in ['n', 'no', 'N', 'NO', 'No']:
-                self.logdir = './' + input('Enter new session name: ')
+                self.logdir = './' + raw_input('Enter new session name: ')
                 os.makedirs(self.logdir)
         self.checkpointdir = self.logdir + '/checkpoint/'
         if not os.path.exists(self.checkpointdir):
             os.makedirs(self.checkpointdir)
-        _, _, self.vocab = onehotencode('A')
+        _, _, self.vocab = _onehotencode('A')
         
         self.initialize_model(self.seed)
     
-    def initialize_model(self, seed=1749):
+    def initialize_model(self, seed=42):
         """Method to initialize the model with all parameters saved in the attributes. This method is used during
         initialization of the class, as well as in cross-validation to reinitialize a fresh model for every fold.
         
@@ -455,41 +506,48 @@ class Model(object):
         else:
             plt.savefig(filename)
     
-    def sample(self, num=10, maxlen=50, start=None, temp=1., show=False):
+    def sample(self, num=10, minlen=7, maxlen=50, start=None, temp=1., show=False):
         """Invoke generation of sequence patterns through sampling from the trained model.
         
         :param num: {int} number of sequences to sample
-        :param maxlen: {int} maximal length of each pattern generated, if ``seqlen=0``, = longest sequence length
+        :param minlen {int} minimal allowed sequence length
+        :param maxlen: {int} maximal length of each pattern generated, if 0, a random length is chosen between 7 and 50
         :param start: {str} start AA to be used for sampling. If ``None``, a random AA is chosen
         :param temp: {float} temperature value to sample at.
         :param show: {bool} whether the sampled sequences should be printed out
         :return: {array} matrix of patterns of shape (num, seqlen, inputshape[0])
         """
+        print("\nSampling...\n")
         sampled = []
         pbar = ProgressBar()
-        if maxlen == 0:
-            maxlen = self.inshape
-        
-        print("\nSampling...\n")
         for rs in pbar(range(num)):
-            random.seed = rs
+            random.seed(rs)
+            if not maxlen:  # if the length should be randomly sampled
+                longest = np.random.randint(7, 50)
+            else:
+                longest = maxlen
+
             if start:
                 start_aa = start
             else:  # generate random starting letter
                 start_aa = 'B'
             sequence = start_aa  # start with starting letter
-            
-            while sequence[-1] != ' ' and len(sequence) <= maxlen:
-                x, _, _ = onehotencode(sequence)
+
+            while sequence[-1] != ' ' and len(sequence) <= longest:
+                x, _, _ = _onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
-                next_aa = sample_with_temp(preds, temp=temp)
+                next_aa = _sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
+
+            sequence = sequence[len(start_aa):].rstrip()
+
+            if len(sequence) < minlen:
+                continue
+
+            sampled.append(sequence)
             if show:
                 print(sequence)
-            if start_aa == 'B':
-                sampled.append(sequence[1:-1])
-            else:
-                sampled.append(sequence[:-1])
+
         return sampled
     
     def load_model(self, filename):
@@ -501,22 +559,19 @@ class Model(object):
 
 
 def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, target='all',
-         valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.001, modfile=None,
-         samplelength=36, cv=None):
+         valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.01, modfile=None,
+         samplelength=36, pad=0, dist=False, cv=None):
     
     # loading sequence data, analyze, pad and encode it
-    data = SequenceHandler()
+    data = SequenceHandler(window=window)
     data.load_sequences(infile)
     data.analyze_training()
     
     # pad sequences
-    if window != 0:
-        data.pad_sequences(padlen=int(window / 5))  # padd sequences windows with 1/5 end strings
-    else:
-        data.pad_sequences(padlen=False)
-    
+    data.pad_sequences(padlen=pad)
+
     # one-hot encode padded sequences
-    data.one_hot_encode(window=window, step=step)
+    data.one_hot_encode(step=step, target=target)
     
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
@@ -531,7 +586,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
             model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
         else:
             # training model on data
-            print("\nTRAINING MODEL...\n")
+            print("\nTRAINING MODEL FOR %i EPOCHS...\n" % epochs)
             model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
             model.plot_losses()  # plot loss
     
@@ -542,13 +597,18 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
-    #data.analyze_generated(distances=False)
-    data.save_generated(model.logdir + '/sampled_sequences.csv')
+    data.analyze_generated(distances=dist)
+    data.save_generated(model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
 
 
 if __name__ == "__main__":
-    main(FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
+
+    # run main code
+    main(infile=FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
          learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
-         step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target)
+         step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target, pad=FLAGS.padlen, dist=FLAGS.distance)
+
+    # save used flags to log file
+    _save_flags(FLAGS, "./" + FLAGS.run_name + "/flags.txt")
