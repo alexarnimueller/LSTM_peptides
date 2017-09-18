@@ -1,7 +1,8 @@
 # LSTM_peptides
 ## Introduction
 This repository contains scripts for training a generative long short-term memory recurrent neural network on peptide sequences. 
-The code relies on the keras package by Chollet and others (https://github.com/fchollet/keras) and on scikit-learn (http://scikit-learn.org).
+The code relies on the keras package by Chollet and others (https://github.com/fchollet/keras) with TensorFlow 
+backend (http://tensorflow.org) as well as on scikit-learn (http://scikit-learn.org).
 
 ## Content
 - README.md: this file
@@ -14,13 +15,13 @@ The code relies on the keras package by Chollet and others (https://github.com/f
 ## How To Use
 First, install all requirements (in `requirements.txt`). In this folder, type: 
 
-``` python
+``` bash
 pip install -r requirements.txt
 ```
 
 Then run the model as follows:
 
-``` python
+``` bash
 python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME  $FURTHER_OPTIONAL_PARAMETERS
 ```
 
@@ -67,11 +68,11 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
 
 
 ### Example: sampling 100 sequences from a pre-trained model
-``` python
+``` bash
 python LSTM_peptides.py --run_name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --train False --sample 100
 ```
 
 ### Example: training a 2-layer model on new sequences for 100 epochs
-``` python
+``` bash
 python LSTM_peptides.py --run_name train100 --dataset new_sequences.csv --layers 2 --epochs 100
 ```
