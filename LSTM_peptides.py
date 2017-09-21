@@ -533,7 +533,7 @@ class Model(object):
             while sequence[-1] != ' ' and len(sequence) <= longest:
                 x, _, _ = _onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
-                next_aa = _sample(preds, temp=temp)
+                next_aa = _sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
 
             sequence = sequence[len(start_aa):].rstrip()
