@@ -37,13 +37,13 @@ flags = tf.app.flags
 flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
 flags.DEFINE_string("run_name", "test", "run name for log and checkpoint files")
 flags.DEFINE_integer("batch_size", 128, "batch size")
-flags.DEFINE_integer("epochs", 50, "epochs to train")
+flags.DEFINE_integer("epochs", 100, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
-flags.DEFINE_integer("neurons", 128, "number of units per layer")
+flags.DEFINE_integer("neurons", 64, "number of units per layer")
 flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
-flags.DEFINE_integer("maxlen", 48, "maximum sequence length allowed when sampling new sequences")
-flags.DEFINE_float("temp", 1.5, "temperature used for sampling")
+flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
+flags.DEFINE_float("temp", 2.5, "temperature used for sampling")
 flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
 flags.DEFINE_float("dropout", 0.2, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
@@ -143,21 +143,17 @@ def _onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
             return result
 
 
-def _sample_with_temp(preds, temp=1.):
-    """Sample one letter with a given temperature. For that, the softmax results by the network are reverted,
-    divided by a temperature and transformed back into probabilities through a binomial distribution.
+def _sample_with_temp(preds, temp=1.0):
+    """Helper function to sample one letter from a probability array given a temperature.
 
     :param preds: {np.array} predictions returned by the network
     :param temp: {float} temperature value to sample at.
-    :return: most probable letter
     """
-    preds = np.asarray(preds).astype('float64')
-    preds = np.log(preds) / temp
-    exp_preds = np.exp(preds)
-    preds = exp_preds / np.sum(exp_preds)
-    probas = np.random.multinomial(1, preds, 1)
-    return np.argmax(probas)
-    
+    streched = np.log(preds) / temp
+    vocab_size = len(streched)
+    strethced_probs = np.exp(streched) / np.sum(np.exp(streched))
+    return np.random.choice(vocab_size, p=strethced_probs)
+
     
 class SequenceHandler(object):
     """
@@ -390,9 +386,10 @@ class Model(object):
         """
         self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # init weights randomly -0.05 and 0.05
         self.model = Sequential()
-        self.model.add(BatchNormalization(input_shape=self.inshape, name='BatchNorm'))
         for l in range(self.layers):
-            self.model.add(LSTM(self.neurons, name='LSTM%i' % (l + 1),
+            self.model.add(LSTM(units=self.neurons,
+                                name='LSTM%i' % (l + 1),
+                                input_shape=self.inshape,
                                 return_sequences=True,
                                 kernel_initializer=self.weight_init,
                                 use_bias=True,
@@ -536,7 +533,7 @@ class Model(object):
             while sequence[-1] != ' ' and len(sequence) <= longest:
                 x, _, _ = _onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
-                next_aa = _sample_with_temp(preds, temp=temp)
+                next_aa = _sample(preds, temp=temp)
                 sequence += self.vocab[next_aa]
 
             sequence = sequence[len(start_aa):].rstrip()
