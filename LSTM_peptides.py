@@ -61,15 +61,15 @@ flags.DEFINE_bool("distance", True, "distance calculation of sampled vs. trainin
 FLAGS = flags.FLAGS
 
 
-def _save_flags(flags, filename):
+def _save_flags(flgs, filename):
     """Function to save used tf.FLAGS to log-file
 
-    :param flags: tensorflow flags
+    :param flgs: tensorflow flags
     :return: saved file
     """
     with open(filename, 'w') as f:
         f.write("Used flags:\n-----------\n")
-        for k, v in flags.__dict__['__flags'].items():
+        for k, v in flgs.__dict__['__flags'].items():
             f.write(k + ": " + str(v) + "\n")
 
 
