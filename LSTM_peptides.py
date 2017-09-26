@@ -514,7 +514,7 @@ class Model(object):
         else:
             plt.savefig(filename)
     
-    def sample(self, num=10, minlen=7, maxlen=50, start=None, temp=1., show=False):
+    def sample(self, num=10, minlen=7, maxlen=48, start=None, temp=1., show=False):
         """Invoke generation of sequence patterns through sampling from the trained model.
         
         :param num: {int} number of sequences to sample
@@ -531,7 +531,7 @@ class Model(object):
         for rs in pbar(range(num)):
             random.seed(rs)
             if not maxlen:  # if the length should be randomly sampled
-                longest = np.random.randint(10, 40)
+                longest = np.random.randint(7, 48)
             else:
                 longest = maxlen
 
