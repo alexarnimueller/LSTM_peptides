@@ -463,9 +463,14 @@ class Model(object):
         self.cv_val_loss_std = np.std(self.val_losses, axis=0)
         if plot:
             self.plot_losses(cv=True)
-        print("\n%i-th epoch's %i-fold cross-validation loss: %.4f ± %.4f\n\n" %
-              (epochs, cv, self.cv_val_loss[-1], self.cv_val_loss_std[-1]))
-    
+
+        # get best epoch with corresponding val_loss
+        minloss = np.min(self.cv_val_loss)
+        e = np.where(minloss == self.cv_val_loss)[0][0]
+        print("\n%i-fold cross-validation result:\n\nBest epoch:\t%i\nVal_loss:\t%.4f" % (cv, e, minloss))
+        with open(self.logdir + '/' + self.session_name + '_best_epoch.txt', 'w') as f:
+            f.write("%i-fold cross-validation result:\n\nBest epoch:\t%i\nVal_loss:\t%.4f" % (cv, e, minloss))
+
     def plot_losses(self, show=False, cv=False):
         """Plot the losses obtained in training.
         
