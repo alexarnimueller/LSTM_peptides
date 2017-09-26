@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
 ..author:: Alex Müller, ETH Zürich, Switzerland.
@@ -15,7 +16,7 @@ import tensorflow as tf
 from scipy.spatial import distance
 from keras.callbacks import ModelCheckpoint
 from keras.initializers import RandomNormal
-from keras.layers import Dense, LSTM, BatchNormalization, TimeDistributed
+from keras.layers import Dense, LSTM, TimeDistributed
 from keras.models import Sequential
 from keras.optimizers import Adam
 from progressbar import ProgressBar
@@ -35,8 +36,8 @@ import matplotlib.pyplot as plt
 flags = tf.app.flags
 
 flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
-flags.DEFINE_string("run_name", "test", "run name for log and checkpoint files")
-flags.DEFINE_integer("batch_size", 128, "batch size")
+flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
+flags.DEFINE_integer("batch_size", 256, "batch size")
 flags.DEFINE_integer("epochs", 100, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
@@ -166,6 +167,8 @@ class SequenceHandler(object):
         """
         self.sequences = None
         self.generated = None
+        self.ran = None
+        self.hel = None
         self.X = list()
         self.y = list()
         self.window = window
@@ -263,7 +266,6 @@ class SequenceHandler(object):
         
         :param distances: {bool} whether distances in descriptor space should comparing sampled and training
         molecules should be calculated.
-        sampled
         :return:
         """
         count = 0
@@ -290,16 +292,16 @@ class SequenceHandler(object):
             gen_desc.calculate_autocorr(7)
 
             # random comparison set
-            ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate random seqs
+            self.ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate random seqs
             probas = count_aas(''.join(seq_desc.sequences)).values()  # get the amino acid distribution of training seqs
-            ran.generate_sequences(proba=probas)
-            ran_desc = PeptideDescriptor(ran.sequences, 'PPCALI')
+            self.ran.generate_sequences(proba=probas)
+            ran_desc = PeptideDescriptor(self.ran.sequences, 'PPCALI')
             ran_desc.calculate_autocorr(7)
 
             # amphipathic helices comparison set
-            hel = Helices(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))
-            hel.generate_sequences()
-            hel_desc = PeptideDescriptor(hel.sequences, 'PPCALI')
+            self.hel = Helices(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))
+            self.hel.generate_sequences()
+            hel_desc = PeptideDescriptor(self.hel.sequences, 'PPCALI')
             hel_desc.calculate_autocorr(7)
 
             # distance calculation
@@ -313,16 +315,20 @@ class SequenceHandler(object):
                 hel_dist = distance.cdist(hel_desc.descriptor, seq_desc.descriptor, metric=dist)
                 print("\tAverage %s distance if amphipathic helical seqs:\t%.4f" % (dist, np.mean(hel_dist)))
 
-    def save_generated(self, filename):
+    def save_generated(self, logdir, filename):
         """Save all sequences in `self.generated` to file
-        
+
+        :param logdir: {str} current log directory (used for comparison sequences)
         :param filename: {str} filename to save the sequences to
         :return: saved file
         """
         with open(filename, 'w') as f:
             for s in self.generated:
                 f.write(s + '\n')
-        
+
+        self.ran.save_fasta(logdir + '/random_sequences.fasta')
+        self.hel.save_fasta(logdir + '/helical_sequences.fasta')
+
 
 class Model(object):
     """
@@ -457,7 +463,7 @@ class Model(object):
         self.cv_val_loss_std = np.std(self.val_losses, axis=0)
         if plot:
             self.plot_losses(cv=True)
-        print("\n%i-th epoch's %i-fold cross-validation loss: %.4f ± %.4f" %
+        print("\n%i-th epoch's %i-fold cross-validation loss: %.4f ± %.4f\n\n" %
               (epochs, cv, self.cv_val_loss[-1], self.cv_val_loss_std[-1]))
     
     def plot_losses(self, show=False, cv=False):
@@ -520,7 +526,7 @@ class Model(object):
         for rs in pbar(range(num)):
             random.seed(rs)
             if not maxlen:  # if the length should be randomly sampled
-                longest = np.random.randint(7, 50)
+                longest = np.random.randint(10, 40)
             else:
                 longest = maxlen
 
@@ -538,7 +544,10 @@ class Model(object):
 
             sequence = sequence[len(start_aa):].rstrip()
 
-            if len(sequence) < minlen:
+            if len(sequence) < minlen + 1:  # the final space also counts to the length, hence +1
+                continue
+
+            if start_aa in sequence:  # if a start character was sampled in the sequence, ignore it
                 continue
 
             sampled.append(sequence)
@@ -580,7 +589,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
             print("\nPERFORMING %i-FOLD CROSS-VALIDATION...\n" % cv)
             model.cross_val(data.X, data.y, epochs=epochs, cv=cv)
             model.initialize_model()
-            model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
+            model.train(data.X, data.y, epochs=epochs, valsplit=0.0, sample=0)
         else:
             # training model on data
             print("\nTRAINING MODEL FOR %i EPOCHS...\n" % epochs)
@@ -595,17 +604,17 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
     data.analyze_generated(distances=dist)
-    data.save_generated(model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
+    data.save_generated(model.logdir, model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
 
 
 if __name__ == "__main__":
 
     # run main code
-    main(infile=FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
+    main(infile=FLAGS.dataset, sessname=FLAGS.name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
          learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
          step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target, pad=FLAGS.padlen, dist=FLAGS.distance)
 
     # save used flags to log file
-    _save_flags(FLAGS, "./" + FLAGS.run_name + "/flags.txt")
+    _save_flags(FLAGS, "./" + FLAGS.name + "/flags.txt")
