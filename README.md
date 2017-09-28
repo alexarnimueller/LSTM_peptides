@@ -28,8 +28,8 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
 #### Parameters:
 - `dataset`
   - file containing training data with one sequence per line
-- `run_name`
-  - name for all generated data; a new directory will be created with this name
+- `name`
+  - run name for all generated data; a new directory will be created with this name
 - `batch_size` *(OPTIONAL, default=128)*
   - Batch size to use by the model.
 - `epochs` *(OPTIONAL, default=25)*

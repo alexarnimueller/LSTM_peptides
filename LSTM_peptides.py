@@ -18,6 +18,7 @@ from keras.initializers import RandomNormal
 from keras.layers import Dense, LSTM, BatchNormalization, TimeDistributed
 from keras.models import Sequential
 from keras.optimizers import Adam
+from keras.utils import plot_model
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
@@ -35,19 +36,21 @@ import matplotlib.pyplot as plt
 flags = tf.app.flags
 
 flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
-flags.DEFINE_string("run_name", "test", "run name for log and checkpoint files")
+flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
 flags.DEFINE_integer("batch_size", 128, "batch size")
-flags.DEFINE_integer("epochs", 50, "epochs to train")
+flags.DEFINE_integer("epochs", 100, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
-flags.DEFINE_integer("neurons", 128, "number of units per layer")
+flags.DEFINE_integer("neurons", 64, "number of units per layer")
 flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
-flags.DEFINE_integer("maxlen", 48, "maximum sequence length allowed when sampling new sequences")
+flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences, if 0: random")
 flags.DEFINE_float("temp", 1.5, "temperature used for sampling")
 flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
-flags.DEFINE_float("dropout", 0.2, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
+flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
 flags.DEFINE_float("lr", 0.01, "learning rate to be used with the Adam optimizer")
+flags.DEFINE_bool("batchnorm", False, "if True, a BatchNormalization layer is added after every LSTM layer")
+flags.DEFINE_bool("timedistr", True, "if True, the last Dense layer is wrapped by TimeDistributed")
 flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
 flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
 flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
@@ -333,8 +336,8 @@ class Model(object):
     Class containing the LSTM model to learn sequential data
     """
     
-    def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2, lr=0.001,
-                 loss='categorical_crossentropy', dropoutfract=0.1, seed=42):
+    def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2, lr=0.001, dropoutfract=0.1,
+                 loss='categorical_crossentropy', batchnorm=False, timedist=True, seed=42):
         """Initialize the model
         
         :param n_vocab: {int} length of vocabulary
@@ -348,6 +351,8 @@ class Model(object):
         :param lr: {float} learning rate to use with Adam optimizer
         :param dropoutfract: {float} fraction of dropout to add to each layer. Layer1 gets 1 * value, Layer2 2 *
         value and so on.
+        :param timedist: {bool} whether the output dense layer should be time distributed (one layer per time step)
+
         :param seed {int} random seed used to initialize weights
         """
         random.seed(seed)
@@ -367,12 +372,14 @@ class Model(object):
         self.cv_val_loss_std = None
         self.model = None
         self.losstype = loss
+        self.timedist = timedist
+        self.batchnorm = batchnorm
         self.optimizer = Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         self.session_name = session_name
         self.logdir = './' + session_name
         if os.path.exists(self.logdir):
-            decision = raw_input('\nSession folder already exists!\nDo you want to overwrite the previous session? [y/n] ')
-            if decision in ['n', 'no', 'N', 'NO', 'No']:
+            decide = raw_input('\nSession folder already exists!\nDo you want to overwrite the previous session? [y/n] ')
+            if decide in ['n', 'no', 'N', 'NO', 'No']:
                 self.logdir = './' + raw_input('Enter new session name: ')
                 os.makedirs(self.logdir)
         self.checkpointdir = self.logdir + '/checkpoint/'
@@ -380,26 +387,35 @@ class Model(object):
             os.makedirs(self.checkpointdir)
         _, _, self.vocab = _onehotencode('A')
         
-        self.initialize_model(self.seed)
+        self.initialize_model(seed=self.seed)
     
     def initialize_model(self, seed=42):
         """Method to initialize the model with all parameters saved in the attributes. This method is used during
         initialization of the class, as well as in cross-validation to reinitialize a fresh model for every fold.
         
+        :param seed: {int} random seed to use for weight initialization
+        
         :return: initialized model in ``self.model``
         """
-        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # init weights randomly -0.05 and 0.05
+        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
-        self.model.add(BatchNormalization(input_shape=self.inshape, name='BatchNorm'))
         for l in range(self.layers):
-            self.model.add(LSTM(self.neurons, name='LSTM%i' % (l + 1),
+            self.model.add(LSTM(self.neurons,
+                                input_shape=self.inshape,
+                                name='LSTM%i' % (l + 1),
                                 return_sequences=True,
                                 kernel_initializer=self.weight_init,
                                 use_bias=True,
                                 bias_initializer='zeros',
                                 unit_forget_bias=True,
                                 dropout=self.dropout * (l + 1)))
-        self.model.add(TimeDistributed(Dense(self.outshape, activation='softmax', name='Dense')))
+            if self.batchnorm:
+                self.model.add(BatchNormalization(name='BatchNorm%i' % (l + 1)))
+        if self.timedist:
+            self.model.add(TimeDistributed(Dense(self.outshape, activation='softmax', name='Dense')))
+        else:
+            self.model.add(Dense(self.outshape, activation='softmax', name='Dense'))
+        
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
     
     def train(self, x, y, epochs=10, valsplit=0.2, sample=10):
@@ -559,8 +575,8 @@ class Model(object):
 
 
 def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, target='all',
-         valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.01, modfile=None,
-         samplelength=36, pad=0, dist=False, cv=None):
+         valsplit=0.2, batchnorm=False, timedistr=True, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True,
+         learningrate=0.01, modfile=None, samplelength=36, pad=0, dist=False, cv=None):
     
     # loading sequence data, analyze, pad and encode it
     data = SequenceHandler(window=window)
@@ -576,7 +592,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
                   batch=batchsize, layers=layers, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, seed=42)
+                  dropoutfract=dropout, batchnorm=batchnorm, timedist=timedistr, seed=42)
     
     if train:
         if cv:
@@ -599,16 +615,17 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
     data.analyze_generated(distances=dist)
     data.save_generated(model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
-
+    plot_model(model.model, show_shapes=True, show_layer_names=True, to_file=model.logdir + '/architecture.pdf')
 
 if __name__ == "__main__":
 
     # run main code
-    main(infile=FLAGS.dataset, sessname=FLAGS.run_name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
+    main(infile=FLAGS.dataset, sessname=FLAGS.name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
-         learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
-         step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target, pad=FLAGS.padlen, dist=FLAGS.distance)
+         learningrate=FLAGS.lr, batchnorm=FLAGS.batchnorm, timedistr=FLAGS.timedistr, cv=FLAGS.cv,
+         samplelength=FLAGS.maxlen, window=FLAGS.window, step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target,
+         pad=FLAGS.padlen, dist=FLAGS.distance)
 
     # save used flags to log file
-    _save_flags(FLAGS, "./" + FLAGS.run_name + "/flags.txt")
+    _save_flags(FLAGS, "./" + FLAGS.name + "/flags.txt")
