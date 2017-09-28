@@ -38,23 +38,14 @@ flags = tf.app.flags
 
 flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
 flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
-<<<<<<< HEAD
-flags.DEFINE_integer("batch_size", 128, "batch size")
-=======
 flags.DEFINE_integer("batch_size", 256, "batch size")
->>>>>>> d61cd0b57b03daa270a46088196a3c04ec75c899
 flags.DEFINE_integer("epochs", 100, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_integer("neurons", 64, "number of units per layer")
 flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
-<<<<<<< HEAD
-flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences, if 0: random")
-flags.DEFINE_float("temp", 1.5, "temperature used for sampling")
-=======
 flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
 flags.DEFINE_float("temp", 2.5, "temperature used for sampling")
->>>>>>> d61cd0b57b03daa270a46088196a3c04ec75c899
 flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
 flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
@@ -411,28 +402,17 @@ class Model(object):
         self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
         for l in range(self.layers):
-<<<<<<< HEAD
-            self.model.add(LSTM(self.neurons,
-                                input_shape=self.inshape,
-                                name='LSTM%i' % (l + 1),
-=======
             self.model.add(LSTM(units=self.neurons,
                                 name='LSTM%i' % (l + 1),
                                 input_shape=self.inshape,
->>>>>>> d61cd0b57b03daa270a46088196a3c04ec75c899
+
                                 return_sequences=True,
                                 kernel_initializer=self.weight_init,
                                 use_bias=True,
                                 bias_initializer='zeros',
                                 unit_forget_bias=True,
                                 dropout=self.dropout * (l + 1)))
-            if self.batchnorm:
-                self.model.add(BatchNormalization(name='BatchNorm%i' % (l + 1)))
-        if self.timedist:
-            self.model.add(TimeDistributed(Dense(self.outshape, activation='softmax', name='Dense')))
-        else:
-            self.model.add(Dense(self.outshape, activation='softmax', name='Dense'))
-        
+        self.model.add(Dense(self.outshape, activation='softmax', name='Dense'))
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
     
     def train(self, x, y, epochs=10, valsplit=0.2, sample=10):
@@ -639,13 +619,8 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
     data.analyze_generated(distances=dist)
-<<<<<<< HEAD
     data.save_generated(model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
     plot_model(model.model, show_shapes=True, show_layer_names=True, to_file=model.logdir + '/architecture.pdf')
-=======
-    data.save_generated(model.logdir, model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
-
->>>>>>> d61cd0b57b03daa270a46088196a3c04ec75c899
 
 if __name__ == "__main__":
 
