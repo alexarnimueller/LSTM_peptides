@@ -16,16 +16,16 @@ import tensorflow as tf
 from scipy.spatial import distance
 from keras.callbacks import ModelCheckpoint
 from keras.initializers import RandomNormal
-from keras.layers import Dense, LSTM, TimeDistributed
+from keras.layers import Dense, LSTM
 from keras.models import Sequential
 from keras.optimizers import Adam
-from keras.utils import plot_model
+from keras.regularizers import l2
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
 from modlamp.sequences import Random, Helices
-from modlamp.core import count_aa
+from modlamp.core import count_aas
 
 sess = tf.Session()
 from keras import backend as K
@@ -297,7 +297,7 @@ class SequenceHandler(object):
 
             # random comparison set
             self.ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate rand seqs
-            probas = count_aa(''.join(seq_desc.sequences)).values()  # get the aa distribution of training seqs
+            probas = count_aas(''.join(seq_desc.sequences)).values()  # get the aa distribution of training seqs
             self.ran.generate_sequences(proba=probas)
             ran_desc = PeptideDescriptor(self.ran.sequences, descriptor)
             ran_desc.calculate_autocorr(7)
@@ -443,7 +443,8 @@ class Model(object):
         
         :return: initialized model in ``self.model``
         """
-        self.model = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
+        v_l2 = 0.0001
+        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
         for l in range(self.layers):
             self.model.add(LSTM(units=self.neurons,
@@ -452,11 +453,16 @@ class Model(object):
 
                                 return_sequences=True,
                                 kernel_initializer=self.weight_init,
+                                kernel_regularizer=l2(v_l2),
                                 use_bias=True,
                                 bias_initializer='zeros',
                                 unit_forget_bias=True,
                                 dropout=self.dropout * (l + 1)))
-        self.model.add(Dense(self.outshape, activation='softmax', name='Dense'))
+        self.model.add(Dense(self.outshape,
+                             name='Dense',
+                             activation='softmax',
+                             kernel_regularizer=l2(v_l2),
+                             kernel_initializer=self.weight_init))
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
     
     def train(self, x, y, epochs=10, valsplit=0.2, sample=10):
