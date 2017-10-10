@@ -399,7 +399,7 @@ class Model(object):
         
         :return: initialized model in ``self.model``
         """
-        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
+        self. = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
         for l in range(self.layers):
             self.model.add(LSTM(units=self.neurons,
