@@ -37,7 +37,7 @@ import matplotlib.pyplot as plt
 
 flags = tf.app.flags
 
-flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
+flags.DEFINE_string("dataset", "training_sequences7-50_APD3_CAMP_YADAMP.csv", "dataset file (expecting csv)")
 flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
 flags.DEFINE_integer("batch_size", 256, "batch size")
 flags.DEFINE_integer("epochs", 100, "epochs to train")
