@@ -25,7 +25,7 @@ from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
 from modlamp.sequences import Random, Helices
-from modlamp.core import count_aas
+from modlamp.core import count_aa
 
 sess = tf.Session()
 from keras import backend as K
@@ -297,7 +297,7 @@ class SequenceHandler(object):
 
             # random comparison set
             self.ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate rand seqs
-            probas = count_aas(''.join(seq_desc.sequences)).values()  # get the aa distribution of training seqs
+            probas = count_aa(''.join(seq_desc.sequences)).values()  # get the aa distribution of training seqs
             self.ran.generate_sequences(proba=probas)
             ran_desc = PeptideDescriptor(self.ran.sequences, descriptor)
             ran_desc.calculate_autocorr(7)
@@ -443,7 +443,7 @@ class Model(object):
         
         :return: initialized model in ``self.model``
         """
-        self. = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
+        self.model = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
         for l in range(self.layers):
             self.model.add(LSTM(units=self.neurons,
@@ -644,7 +644,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
                   batch=batchsize, layers=layers, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, batchnorm=batchnorm, timedist=timedistr, seed=42)
+                  dropoutfract=dropout, seed=42)
     
     if train:
         if cv:
