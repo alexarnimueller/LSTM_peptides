@@ -22,6 +22,7 @@ from keras.optimizers import Adam
 from keras.utils import plot_model
 from progressbar import ProgressBar
 from sklearn.model_selection import KFold
+from sklearn.preprocessing import StandardScaler
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
 from modlamp.sequences import Random, Helices
 from modlamp.core import count_aas
@@ -60,7 +61,6 @@ flags.DEFINE_integer("padlen", 0, "number of spaces to use for padding sequences
                                   " padded to the length of the longest sequence in the dataset")
 flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
                                   "longest sequence length in the dataset")
-flags.DEFINE_bool("distance", True, "distance calculation of sampled vs. training sequences in descriptor space")
 
 FLAGS = flags.FLAGS
 
@@ -102,13 +102,11 @@ def _onehotencode(s, vocab=None):
     return np.reshape(result, (1, result.shape[0], result.shape[1])), to_one_hot, vocab
 
 
-def _onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
+def _onehotdecode(matrix, vocab=None, filename=None):
     """Decode a given one-hot represented matrix back into sequences
 
     :param matrix: matrix containing sequence patterns that are one-hot encoded
     :param vocab: vocabulary, if None, standard AAs are used
-    :param lenmin: minimum length of sequences to keep
-    :param lenmax: maximum length of sequences to keep
     :param filename: filename for saving sequences, if ``None``, sequences are returned in a list
     :return: list of decoded sequences in the range lenmin-lenmax, if ``filename``, they are saved to a file
     """
@@ -121,12 +119,11 @@ def _onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
                 aa = np.where(matrix[i, j] == 1.)[0][0]
                 result.append(vocab[aa])
         seq = ''.join(result)
-        if lenmin <= len(seq) <= lenmax:
-            if filename:
-                with open(filename, 'wb') as f:
-                    f.write(seq)
-            else:
-                return seq
+        if filename:
+            with open(filename, 'wb') as f:
+                f.write(seq)
+        else:
+            return seq
     
     elif len(matrix.shape) == 3:  # if a matrix containing several strings is supplied
         result = []
@@ -137,8 +134,7 @@ def _onehotdecode(matrix, vocab=None, lenmin=1, lenmax=50, filename=None):
                     aa = np.where(matrix[n, i, j] == 1.)[0][0]
                     oneresult.append(vocab[aa])
             seq = ''.join(oneresult)
-            if lenmin <= len(seq) <= lenmax:
-                result.append(seq)
+            result.append(seq)
         if filename:
             with open(filename, 'wb') as f:
                 for s in result:
@@ -264,59 +260,106 @@ class SequenceHandler(object):
         print("Minimal sequence length:\t%i" % np.min(d.descriptor))
         print("Maximal sequence length:\t%i" % np.max(d.descriptor))
     
-    def analyze_generated(self, distances=True):
+    def analyze_generated(self, num, fname='analysis.txt'):
         """Method to analyze the generated sequences located in `self.generated`.
-        
-        :param distances: {bool} whether distances in descriptor space should comparing sampled and training
-        molecules should be calculated.
-        :return:
+
+        :param num: {int} wanted number of sequences to sample
+        :param fname: {str} filename to save analysis info to
+        :return: file with analysis info (distances)
         """
-        count = 0
-        print("\nNr. of duplicates in generated sequences: %i" % (len(self.generated) - len(set(self.generated))))
-        for g in set(self.generated):
-            if g in self.sequences:
-                count += 1
-        print("%.2f percent of generated sequences are present in the training data." % (count / len(self.generated)))
+        with open(fname, 'w') as f:
+            print("Analyzing...")
+            f.write("ANALYSIS OF SAMPLED SEQUENCES\n==============================\n\n")
+            f.write("Nr. of duplicates in generated sequences: %i\n" % (len(self.generated) - len(set(self.generated))))
+            count = len(set(self.generated) & set(self.sequences))  # get shared entries in both lists
+            f.write("%.1f percent of generated sequences are present in the training data.\n" %
+                    ((count / len(self.generated)) * 100))
 
-        d = GlobalDescriptor(self.generated)
-        d.filter_aa('B')
-        d.length()
-        print("\nLENGTH DISTRIBUTION OF GENERATED DATA:\n")
-        print("Number of valid sequences:\t%i" % len(self.generated))
-        print("Mean sequence length:     \t%.1f ± %.1f" % (np.mean(d.descriptor), np.std(d.descriptor)))
-        print("Median sequence length:   \t%i" % np.median(d.descriptor))
-        print("Minimal sequence length:  \t%i" % np.min(d.descriptor))
-        print("Maximal sequence length:  \t%i" % np.max(d.descriptor))
+            d = GlobalDescriptor(self.generated)
+            l1 = len(d.sequences)
+            d.filter_aa('B')
+            l2 = len(d.sequences)
+            d.length()
+            f.write("\n\nLENGTH DISTRIBUTION OF GENERATED DATA:\n\n")
+            f.write("Number of sequences too short:\t%i\n" % (num - l1))
+            f.write("Number of invalid (with 'B'):\t%i\n" % (l1 - l2))
+            f.write("Number of valid sequences:\t%i\n" % l2)
+            f.write("Mean sequence length:     \t%.1f ± %.1f\n" % (np.mean(d.descriptor), np.std(d.descriptor)))
+            f.write("Median sequence length:   \t%i\n" % np.median(d.descriptor))
+            f.write("Minimal sequence length:  \t%i\n" % np.min(d.descriptor))
+            f.write("Maximal sequence length:  \t%i\n" % np.max(d.descriptor))
 
-        if distances:
-            seq_desc = PeptideDescriptor([s[1:].rstrip() for s in self.sequences], 'PPCALI')
+            descriptor = 'pepcats'
+            seq_desc = PeptideDescriptor([s[1:].rstrip() for s in self.sequences], descriptor)
             seq_desc.calculate_autocorr(7)
-            gen_desc = PeptideDescriptor(d.sequences, 'PPCALI')
+            gen_desc = PeptideDescriptor(d.sequences, descriptor)
             gen_desc.calculate_autocorr(7)
 
             # random comparison set
-            self.ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate random seqs
-            probas = count_aas(''.join(seq_desc.sequences)).values()  # get the amino acid distribution of training seqs
+            self.ran = Random(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))  # generate rand seqs
+            probas = count_aas(''.join(seq_desc.sequences)).values()  # get the aa distribution of training seqs
             self.ran.generate_sequences(proba=probas)
-            ran_desc = PeptideDescriptor(self.ran.sequences, 'PPCALI')
+            ran_desc = PeptideDescriptor(self.ran.sequences, descriptor)
             ran_desc.calculate_autocorr(7)
 
             # amphipathic helices comparison set
             self.hel = Helices(len(self.generated), np.min(d.descriptor), np.max(d.descriptor))
             self.hel.generate_sequences()
-            hel_desc = PeptideDescriptor(self.hel.sequences, 'PPCALI')
+            hel_desc = PeptideDescriptor(self.hel.sequences, descriptor)
             hel_desc.calculate_autocorr(7)
 
             # distance calculation
-            distance_metrics = ['euclidean']  # , 'cosine']
-            for dist in distance_metrics:
-                print("\nCalculating distances...")
-                desc_dist = distance.cdist(gen_desc.descriptor, seq_desc.descriptor, metric=dist)
-                print("\tAverage %s distance in PPCALI descriptor space:\t%.4f" % (dist, np.mean(desc_dist)))
-                ran_dist = distance.cdist(ran_desc.descriptor, seq_desc.descriptor, metric=dist)
-                print("\tAverage %s distance if randomly sampled seqs:\t%.4f" % (dist, np.mean(ran_dist)))
-                hel_dist = distance.cdist(hel_desc.descriptor, seq_desc.descriptor, metric=dist)
-                print("\tAverage %s distance if amphipathic helical seqs:\t%.4f" % (dist, np.mean(hel_dist)))
+            f.write("\n\nDISTANCE CALCULATION IN '%s' DESCRIPTOR SPACE\n\n" % descriptor.upper())
+            desc_dist = distance.cdist(gen_desc.descriptor, seq_desc.descriptor, metric='euclidean')
+            f.write("Average euclidean distance of sampled to training data:\t%.3f +/- %.3f\n" %
+                    (np.mean(desc_dist), np.std(desc_dist)))
+            ran_dist = distance.cdist(ran_desc.descriptor, seq_desc.descriptor, metric='euclidean')
+            f.write("Average euclidean distance if randomly sampled seqs:\t%.3f +/- %.3f\n" %
+                    (np.mean(ran_dist), np.std(ran_dist)))
+            hel_dist = distance.cdist(hel_desc.descriptor, seq_desc.descriptor, metric='euclidean')
+            f.write("Average euclidean distance if amphipathic helical seqs:\t%.3f +/- %.3f\n" %
+                    (np.mean(hel_dist), np.std(hel_dist)))
+
+            # more simple descriptors
+            g_seq = GlobalDescriptor(seq_desc.sequences)
+            g_gen = GlobalDescriptor(gen_desc.sequences)
+            g_ran = GlobalDescriptor(ran_desc.sequences)
+            g_hel = GlobalDescriptor(hel_desc.sequences)
+            g_seq.calculate_all()
+            g_gen.calculate_all()
+            g_ran.calculate_all()
+            g_hel.calculate_all()
+            sclr = StandardScaler()
+            sclr.fit(g_seq.descriptor)
+            f.write("\n\nDISTANCE CALCULATION FOR SCALED GLOBAL DESCRIPTORS\n\n")
+            desc_dist = distance.cdist(sclr.transform(g_gen.descriptor), sclr.transform(g_seq.descriptor), metric='euclidean')
+            f.write("Average euclidean distance of sampled to training data:\t%.2f +/- %.2f\n" %
+                    (np.mean(desc_dist), np.std(desc_dist)))
+            ran_dist = distance.cdist(sclr.transform(g_ran.descriptor), sclr.transform(g_seq.descriptor), metric='euclidean')
+            f.write("Average euclidean distance if randomly sampled seqs:\t%.2f +/- %.2f\n" %
+                    (np.mean(ran_dist), np.std(ran_dist)))
+            hel_dist = distance.cdist(sclr.transform(g_hel.descriptor), sclr.transform(g_seq.descriptor), metric='euclidean')
+            f.write("Average euclidean distance if amphipathic helical seqs:\t%.2f +/- %.2f\n" %
+                    (np.mean(hel_dist), np.std(hel_dist)))
+
+            # hydrophobic moments
+            uh_seq = PeptideDescriptor(seq_desc.sequences, 'eisenberg')
+            uh_seq.calculate_moment()
+            uh_gen = PeptideDescriptor(gen_desc.sequences, 'eisenberg')
+            uh_gen.calculate_moment()
+            uh_ran = PeptideDescriptor(ran_desc.sequences, 'eisenberg')
+            uh_ran.calculate_moment()
+            uh_hel = PeptideDescriptor(hel_desc.sequences, 'eisenberg')
+            uh_hel.calculate_moment()
+            f.write("\n\nHYDROPHOBIC MOMENTS\n\n")
+            f.write("Hydrophobic moment of training seqs:\t%.3f +/- %.3f\n" %
+                    (np.mean(uh_seq.descriptor), np.std(uh_seq.descriptor)))
+            f.write("Hydrophobic moment of sampled seqs:\t%.3f +/- %.3f\n" %
+                    (np.mean(uh_gen.descriptor), np.std(uh_gen.descriptor)))
+            f.write("Hydrophobic moment of random seqs:\t%.3f +/- %.3f\n" %
+                    (np.mean(uh_ran.descriptor), np.std(uh_ran.descriptor)))
+            f.write("Hydrophobic moment of amphipathic seqs:\t%.3f +/- %.3f\n" %
+                    (np.mean(uh_hel.descriptor), np.std(uh_hel.descriptor)))
 
     def save_generated(self, logdir, filename):
         """Save all sequences in `self.generated` to file
@@ -380,8 +423,9 @@ class Model(object):
         self.session_name = session_name
         self.logdir = './' + session_name
         if os.path.exists(self.logdir):
-            decide = raw_input('\nSession folder already exists!\nDo you want to overwrite the previous session? [y/n] ')
-            if decide in ['n', 'no', 'N', 'NO', 'No']:
+            decision = raw_input('\nSession folder already exists!\n'
+                                 'Do you want to overwrite the previous session? [y/n] ')
+            if decision in ['n', 'no', 'N', 'NO', 'No']:
                 self.logdir = './' + raw_input('Enter new session name: ')
                 os.makedirs(self.logdir)
         self.checkpointdir = self.logdir + '/checkpoint/'
@@ -524,7 +568,7 @@ class Model(object):
         else:
             plt.savefig(filename)
     
-    def sample(self, num=10, minlen=7, maxlen=48, start=None, temp=1., show=False):
+    def sample(self, num=100, minlen=7, maxlen=50, start=None, temp=1., show=False):
         """Invoke generation of sequence patterns through sampling from the trained model.
         
         :param num: {int} number of sequences to sample
@@ -537,11 +581,12 @@ class Model(object):
         """
         print("\nSampling...\n")
         sampled = []
+        lcntr = 0
         pbar = ProgressBar()
         for rs in pbar(range(num)):
             random.seed(rs)
             if not maxlen:  # if the length should be randomly sampled
-                longest = np.random.randint(7, 48)
+                longest = np.random.randint(7, 50)
             else:
                 longest = maxlen
 
@@ -551,24 +596,26 @@ class Model(object):
                 start_aa = 'B'
             sequence = start_aa  # start with starting letter
 
-            while sequence[-1] != ' ' and len(sequence) <= longest:
+            while sequence[-1] != ' ' and len(sequence) <= longest:  # sample until padding or maxlen is reached
                 x, _, _ = _onehotencode(sequence)
                 preds = self.model.predict(x)[0][0]
                 next_aa = _sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
 
-            sequence = sequence[len(start_aa):].rstrip()
+            if start_aa == 'B':
+                sequence = sequence[1:].rstrip()
+            else:  # keep starting AA if chosen for sampling
+                sequence = sequence.rstrip()
 
-            if len(sequence) < minlen + 1:  # the final space also counts to the length, hence +1
-                continue
-
-            if start_aa in sequence:  # if a start character was sampled in the sequence, ignore it
+            if len(sequence) < minlen:  # don't take sequences shorter than the minimal length
+                lcntr += 1
                 continue
 
             sampled.append(sequence)
             if show:
                 print(sequence)
 
+        print("\t%i sequences were shorter than %i" % (lcntr, minlen))
         return sampled
     
     def load_model(self, filename):
@@ -580,8 +627,8 @@ class Model(object):
 
 
 def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, target='all',
-         valsplit=0.2, batchnorm=False, timedistr=True, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True,
-         learningrate=0.01, modfile=None, samplelength=36, pad=0, dist=False, cv=None):
+         valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.01,
+         modfile=None, samplelength=36, pad=0, cv=None):
     
     # loading sequence data, analyze, pad and encode it
     data = SequenceHandler(window=window)
@@ -618,9 +665,9 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
-    data.analyze_generated(distances=dist)
-    data.save_generated(model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
-    plot_model(model.model, show_shapes=True, show_layer_names=True, to_file=model.logdir + '/architecture.pdf')
+    data.analyze_generated(sample, fname=model.logdir + '/analysis_temp' + str(temperature) + '.txt')
+    data.save_generated(model.logdir, model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
+
 
 if __name__ == "__main__":
 
@@ -628,9 +675,8 @@ if __name__ == "__main__":
     main(infile=FLAGS.dataset, sessname=FLAGS.name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
          layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
-         learningrate=FLAGS.lr, batchnorm=FLAGS.batchnorm, timedistr=FLAGS.timedistr, cv=FLAGS.cv,
-         samplelength=FLAGS.maxlen, window=FLAGS.window, step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target,
-         pad=FLAGS.padlen, dist=FLAGS.distance)
+         learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
+         step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target, pad=FLAGS.padlen)
 
     # save used flags to log file
     _save_flags(FLAGS, "./" + FLAGS.name + "/flags.txt")
