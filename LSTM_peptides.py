@@ -13,10 +13,11 @@ import random
 import matplotlib
 import numpy as np
 import tensorflow as tf
+import json
 from scipy.spatial import distance
 from keras.callbacks import ModelCheckpoint
 from keras.initializers import RandomNormal
-from keras.layers import Dense, LSTM
+from keras.layers import Dense, LSTM, GRU
 from keras.models import Sequential
 from keras.optimizers import Adam
 from keras.regularizers import l2
@@ -37,13 +38,14 @@ import matplotlib.pyplot as plt
 
 flags = tf.app.flags
 
-flags.DEFINE_string("dataset", "training_sequences7-50_APD3_CAMP_YADAMP.csv", "dataset file (expecting csv)")
+flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
 flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
 flags.DEFINE_integer("batch_size", 256, "batch size")
 flags.DEFINE_integer("epochs", 100, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_integer("neurons", 64, "number of units per layer")
+flags.DEFINE_string("cell", "LSTM", "type of neuron to use, available: LSTM, GRU")
 flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
 flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
 flags.DEFINE_float("temp", 2.5, "temperature used for sampling")
@@ -51,6 +53,7 @@ flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Def
 flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
 flags.DEFINE_float("lr", 0.01, "learning rate to be used with the Adam optimizer")
+flags.DEFINE_float("l2", None, "l2 regularization rate. If None, no l2 regularization is used")
 flags.DEFINE_bool("batchnorm", False, "if True, a BatchNormalization layer is added after every LSTM layer")
 flags.DEFINE_bool("timedistr", True, "if True, the last Dense layer is wrapped by TimeDistributed")
 flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
@@ -276,14 +279,14 @@ class SequenceHandler(object):
                     ((count / len(self.generated)) * 100))
 
             d = GlobalDescriptor(self.generated)
-            l1 = len(d.sequences)
+            len1 = len(d.sequences)
             d.filter_aa('B')
-            l2 = len(d.sequences)
+            len2 = len(d.sequences)
             d.length()
             f.write("\n\nLENGTH DISTRIBUTION OF GENERATED DATA:\n\n")
-            f.write("Number of sequences too short:\t%i\n" % (num - l1))
-            f.write("Number of invalid (with 'B'):\t%i\n" % (l1 - l2))
-            f.write("Number of valid sequences:\t%i\n" % l2)
+            f.write("Number of sequences too short:\t%i\n" % (num - len1))
+            f.write("Number of invalid (with 'B'):\t%i\n" % (len1 - len2))
+            f.write("Number of valid sequences:\t%i\n" % len2)
             f.write("Mean sequence length:     \t%.1f ± %.1f\n" % (np.mean(d.descriptor), np.std(d.descriptor)))
             f.write("Median sequence length:   \t%i\n" % np.median(d.descriptor))
             f.write("Minimal sequence length:  \t%i\n" % np.min(d.descriptor))
@@ -381,8 +384,8 @@ class Model(object):
     Class containing the LSTM model to learn sequential data
     """
     
-    def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2, lr=0.001, dropoutfract=0.1,
-                 loss='categorical_crossentropy', l2_reg=0.001, seed=42):
+    def __init__(self, n_vocab, outshape, session_name, cell="LSTM", n_units=256, batch=64, layers=2, lr=0.001,
+                 dropoutfract=0.1, loss='categorical_crossentropy', l2_reg=None, seed=42):
         """Initialize the model
         
         :param n_vocab: {int} length of vocabulary
@@ -415,8 +418,12 @@ class Model(object):
         self.cv_val_loss = None
         self.cv_val_loss_std = None
         self.model = None
+        self.cell = cell
         self.losstype = loss
-        self.l2 = l2_reg
+        if l2_reg:
+            self.l2 = l2(l2_reg)
+        else:
+            self.l2 = None
         self.optimizer = Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         self.session_name = session_name
         self.logdir = './' + session_name
@@ -444,25 +451,33 @@ class Model(object):
         self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
         for l in range(self.layers):
-            self.model.add(LSTM(units=self.neurons,
-                                name='LSTM%i' % (l + 1),
-                                input_shape=self.inshape,
-
-                                return_sequences=True,
-                                kernel_initializer=self.weight_init,
-                                kernel_regularizer=l2(self.l2),
-                                use_bias=True,
-                                bias_initializer='zeros',
-                                unit_forget_bias=True,
-                                dropout=self.dropout * (l + 1)))
+            if self.cell == "GRU":
+                self.model.add(GRU(units=self.neurons,
+                                   name='GRU%i' % (l + 1),
+                                   input_shape=self.inshape,
+                                   return_sequences=True,
+                                   kernel_initializer=self.weight_init,
+                                   kernel_regularizer=self.l2,
+                                   dropout=self.dropout * (l + 1)))
+            else:
+                self.model.add(LSTM(units=self.neurons,
+                                    name='LSTM%i' % (l + 1),
+                                    input_shape=self.inshape,
+                                    return_sequences=True,
+                                    kernel_initializer=self.weight_init,
+                                    kernel_regularizer=self.l2,
+                                    dropout=self.dropout * (l + 1),
+                                    recurrent_dropout=self.dropout * (l + 1)))
         self.model.add(Dense(self.outshape,
                              name='Dense',
                              activation='softmax',
-                             kernel_regularizer=l2(self.l2),
+                             kernel_regularizer=self.l2,
                              kernel_initializer=self.weight_init))
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
+        with open(self.checkpointdir + "model.json", 'w') as f:
+            json.dump(self.model.to_json(), f)
     
-    def train(self, x, y, epochs=10, valsplit=0.2, sample=10):
+    def train(self, x, y, epochs=100, valsplit=0.2, sample=100):
         """Train the model on given training data.
         
         :param x: {array} training data
@@ -492,7 +507,7 @@ class Model(object):
                     print(s)
         writer.close()
     
-    def cross_val(self, x, y, epochs=10, cv=5, plot=True):
+    def cross_val(self, x, y, epochs=100, cv=5, plot=True):
         """Method to perform cross-validation with the model given data X, y
         
         :param x: {array} training data
@@ -571,7 +586,7 @@ class Model(object):
         else:
             plt.savefig(filename)
     
-    def sample(self, num=100, minlen=7, maxlen=50, start=None, temp=1., show=False):
+    def sample(self, num=100, minlen=7, maxlen=50, start=None, temp=2.5, show=False):
         """Invoke generation of sequence patterns through sampling from the trained model.
         
         :param num: {int} number of sequences to sample
@@ -629,9 +644,9 @@ class Model(object):
         self.model.load_weights(filename)
 
 
-def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, window=0, step=2, target='all',
-         valsplit=0.2, sample=10, aa='B', temperature=0.8, dropout=0.1, train=True, learningrate=0.01,
-         modfile=None, samplelength=36, pad=0, cv=None):
+def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, window=0, step=1, target='all',
+         valsplit=0.2, sample=100, aa='B', temperature=2.5, cell="LSTM", dropout=0.1, train=True, learningrate=0.01,
+         modfile=None, samplelength=36, pad=0, l2_rate=None, cv=None):
     
     # loading sequence data, analyze, pad and encode it
     data = SequenceHandler(window=window)
@@ -646,9 +661,9 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
-                  batch=batchsize, layers=layers, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, l2_reg=0.001, seed=42)
-    
+                  batch=batchsize, layers=layers, cell=cell, loss='categorical_crossentropy', lr=learningrate,
+                  dropoutfract=dropout, l2_reg=l2_rate, seed=42)
+
     if train:
         if cv:
             print("\nPERFORMING %i-FOLD CROSS-VALIDATION...\n" % cv)
@@ -664,7 +679,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     else:
         print("\nUSING PRETRAINED MODEL... (%s)\n" % modfile)
         model.load_model(modfile)
-    
+
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
@@ -676,10 +691,10 @@ if __name__ == "__main__":
 
     # run main code
     main(infile=FLAGS.dataset, sessname=FLAGS.name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
-         layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, sample=FLAGS.sample,
+         layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, cell=FLAGS.cell, sample=FLAGS.sample,
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
          learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
-         step=FLAGS.step, aa=FLAGS.startchar, target=FLAGS.target, pad=FLAGS.padlen)
+         step=FLAGS.step, aa=FLAGS.startchar, l2_rate=FLAGS.l2, target=FLAGS.target, pad=FLAGS.padlen)
 
     # save used flags to log file
     _save_flags(FLAGS, "./" + FLAGS.name + "/flags.txt")
