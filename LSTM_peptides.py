@@ -382,7 +382,7 @@ class Model(object):
     """
     
     def __init__(self, n_vocab, outshape, session_name, n_units=256, batch=64, layers=2, lr=0.001, dropoutfract=0.1,
-                 loss='categorical_crossentropy', batchnorm=False, timedist=True, seed=42):
+                 loss='categorical_crossentropy', l2_reg=0.001, seed=42):
         """Initialize the model
         
         :param n_vocab: {int} length of vocabulary
@@ -396,8 +396,7 @@ class Model(object):
         :param lr: {float} learning rate to use with Adam optimizer
         :param dropoutfract: {float} fraction of dropout to add to each layer. Layer1 gets 1 * value, Layer2 2 *
         value and so on.
-        :param timedist: {bool} whether the output dense layer should be time distributed (one layer per time step)
-
+        :param l2_reg: {float} l2 regularization for kernel
         :param seed {int} random seed used to initialize weights
         """
         random.seed(seed)
@@ -417,8 +416,7 @@ class Model(object):
         self.cv_val_loss_std = None
         self.model = None
         self.losstype = loss
-        self.timedist = timedist
-        self.batchnorm = batchnorm
+        self.l2 = l2_reg
         self.optimizer = Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         self.session_name = session_name
         self.logdir = './' + session_name
@@ -443,7 +441,6 @@ class Model(object):
         
         :return: initialized model in ``self.model``
         """
-        v_l2 = 0.0001
         self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         self.model = Sequential()
         for l in range(self.layers):
@@ -453,7 +450,7 @@ class Model(object):
 
                                 return_sequences=True,
                                 kernel_initializer=self.weight_init,
-                                kernel_regularizer=l2(v_l2),
+                                kernel_regularizer=l2(self.l2),
                                 use_bias=True,
                                 bias_initializer='zeros',
                                 unit_forget_bias=True,
@@ -461,7 +458,7 @@ class Model(object):
         self.model.add(Dense(self.outshape,
                              name='Dense',
                              activation='softmax',
-                             kernel_regularizer=l2(v_l2),
+                             kernel_regularizer=l2(self.l2),
                              kernel_initializer=self.weight_init))
         self.model.compile(loss=self.losstype, optimizer=self.optimizer)
     
@@ -650,7 +647,7 @@ def main(infile, sessname, neurons=256, layers=2, epochs=10, batchsize=64, windo
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
                   batch=batchsize, layers=layers, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, seed=42)
+                  dropoutfract=dropout, l2_reg=0.001, seed=42)
     
     if train:
         if cv:
