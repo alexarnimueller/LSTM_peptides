@@ -13,12 +13,12 @@ import random
 import matplotlib
 import numpy as np
 import tensorflow as tf
-import json
+import pickle
 from scipy.spatial import distance
 from keras.callbacks import ModelCheckpoint
 from keras.initializers import RandomNormal
 from keras.layers import Dense, LSTM, GRU
-from keras.models import Sequential
+from keras.models import Sequential, load_model
 from keras.optimizers import Adam
 from keras.regularizers import l2
 from progressbar import ProgressBar
@@ -156,7 +156,23 @@ def _sample_with_temp(preds, temp=1.0):
     strethced_probs = np.exp(streched) / np.sum(np.exp(streched))
     return np.random.choice(vocab_size, p=strethced_probs)
 
-    
+
+def load_model_instance(filename):
+    modfile = os.path.dirname(filename) + '/model.p'
+    mod = pickle.load(open(modfile, 'rb'))
+    hdf5_file = ''.join(modfile.split('.')[:-1]) + '.hdf5'
+    mod.model = load_model(hdf5_file)
+    return mod
+
+
+def save_model_instance(mod):
+    tmp = mod.model
+    tmp.save(mod.checkpointdir + 'model.hdf5')
+    mod.model = None
+    pickle.dump(mod, open(mod.checkpointdir + 'model.p', 'wb'))
+    mod.model = tmp
+
+
 class SequenceHandler(object):
     """
     Class for handling peptide sequences, e.g. loading, one-hot encoding or decoding and saving
@@ -410,7 +426,6 @@ class Model(object):
         """
         random.seed(seed)
         self.seed = seed
-        self.weight_init = None
         self.dropout = dropoutfract
         self.inshape = (None, n_vocab)
         self.outshape = outshape
@@ -419,6 +434,7 @@ class Model(object):
         self.losses = list()
         self.val_losses = list()
         self.batchsize = batch
+        self.lr = lr
         self.cv_loss = None
         self.cv_loss_std = None
         self.cv_val_loss = None
@@ -426,13 +442,9 @@ class Model(object):
         self.model = None
         self.cell = cell
         self.losstype = loss
-        if l2_reg:
-            self.l2 = l2(l2_reg)
-        else:
-            self.l2 = None
-        self.optimizer = Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         self.session_name = session_name
         self.logdir = './' + session_name
+        self.l2 = l2_reg
         if ask and os.path.exists(self.logdir):
             decision = raw_input('\nSession folder already exists!\n'
                                  'Do you want to overwrite the previous session? [y/n] ')
@@ -443,46 +455,52 @@ class Model(object):
         if not os.path.exists(self.checkpointdir):
             os.makedirs(self.checkpointdir)
         _, _, self.vocab = _onehotencode('A')
-        
+
         self.initialize_model(seed=self.seed)
     
     def initialize_model(self, seed=42):
         """Method to initialize the model with all parameters saved in the attributes. This method is used during
         initialization of the class, as well as in cross-validation to reinitialize a fresh model for every fold.
-        
+
         :param seed: {int} random seed to use for weight initialization
         
         :return: initialized model in ``self.model``
         """
-        self.weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
+        weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
+        optimizer = Adam(lr=self.lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
+
+        if self.l2:
+            l2reg = l2(self.l2)
+        else:
+            l2reg = None
+
         self.model = Sequential()
+
         for l in range(self.layers):
             if self.cell == "GRU":
                 self.model.add(GRU(units=self.neurons,
                                    name='GRU%i' % (l + 1),
                                    input_shape=self.inshape,
                                    return_sequences=True,
-                                   kernel_initializer=self.weight_init,
-                                   kernel_regularizer=self.l2,
+                                   kernel_initializer=weight_init,
+                                   kernel_regularizer=l2reg,
                                    dropout=self.dropout * (l + 1)))
             else:
                 self.model.add(LSTM(units=self.neurons,
                                     name='LSTM%i' % (l + 1),
                                     input_shape=self.inshape,
                                     return_sequences=True,
-                                    kernel_initializer=self.weight_init,
-                                    kernel_regularizer=self.l2,
+                                    kernel_initializer=weight_init,
+                                    kernel_regularizer=l2reg,
                                     dropout=self.dropout * (l + 1),
                                     recurrent_dropout=self.dropout * (l + 1)))
         self.model.add(Dense(self.outshape,
                              name='Dense',
                              activation='softmax',
-                             kernel_regularizer=self.l2,
-                             kernel_initializer=self.weight_init))
-        self.model.compile(loss=self.losstype, optimizer=self.optimizer)
-        with open(self.checkpointdir + "model.json", 'w') as f:
-            json.dump(self.model.to_json(), f)
-    
+                             kernel_regularizer=l2reg,
+                             kernel_initializer=weight_init))
+        self.model.compile(loss=self.losstype, optimizer=optimizer)
+
     def train(self, x, y, epochs=100, valsplit=0.2, sample=100):
         """Train the model on given training data.
         
@@ -665,25 +683,27 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
     # one-hot encode padded sequences
     data.one_hot_encode(target=target)
     
-    # building the LSTM model
-    model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
-                  batch=batchsize, layers=layers, cell=cell, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, l2_reg=l2_rate, ask=False, seed=42)
-
     if train:
+        # building the LSTM model
+        model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
+                      batch=batchsize, layers=layers, cell=cell, loss='categorical_crossentropy', lr=learningrate,
+                      dropoutfract=dropout, l2_reg=l2_rate, ask=False, seed=42)
         if cv:
             print("\nPERFORMING %i-FOLD CROSS-VALIDATION...\n" % cv)
             model.cross_val(data.X, data.y, epochs=epochs, cv=cv)
-            model.initialize_model()
+            model.initialize_model(seed=42)
             model.train(data.X, data.y, epochs=epochs, valsplit=0.0, sample=0)
         else:
             # training model on data
             print("\nTRAINING MODEL FOR %i EPOCHS...\n" % epochs)
             model.train(data.X, data.y, epochs=epochs, valsplit=valsplit, sample=0)
             model.plot_losses()  # plot loss
+
+        save_model_instance(model)
     
     else:
         print("\nUSING PRETRAINED MODEL... (%s)\n" % modfile)
+        model = load_model_instance(modfile)
         model.load_model(modfile)
 
     # generating new data through sampling
