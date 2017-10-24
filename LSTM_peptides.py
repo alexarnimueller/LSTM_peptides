@@ -44,27 +44,25 @@ flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
 flags.DEFINE_integer("batch_size", 256, "batch size")
 flags.DEFINE_integer("epochs", 100, "epochs to train")
 flags.DEFINE_integer("layers", 2, "number of layers in the network")
-flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_integer("neurons", 64, "number of units per layer")
+flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_string("cell", "LSTM", "type of neuron to use, available: LSTM, GRU")
 flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
-flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
 flags.DEFINE_float("temp", 2.5, "temperature used for sampling")
+flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
 flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
 flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
 flags.DEFINE_bool("train", True, "wether the network should be trained or just sampled from")
 flags.DEFINE_float("lr", 0.01, "learning rate to be used with the Adam optimizer")
 flags.DEFINE_float("l2", None, "l2 regularization rate. If None, no l2 regularization is used")
-flags.DEFINE_bool("batchnorm", False, "if True, a BatchNormalization layer is added after every LSTM layer")
-flags.DEFINE_bool("timedistr", True, "if True, the last Dense layer is wrapped by TimeDistributed")
 flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
 flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
+flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
+                                  "longest sequence length in the dataset")
 flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
 flags.DEFINE_string("target", "all", "whether to learn all proceeding characters or just the last `one` in sequence")
 flags.DEFINE_integer("padlen", 0, "number of spaces to use for padding sequences (if window not 0); if 0, sequences are"
                                   " padded to the length of the longest sequence in the dataset")
-flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
-                                  "longest sequence length in the dataset")
 
 FLAGS = flags.FLAGS
 
@@ -228,23 +226,23 @@ class SequenceHandler(object):
         """
         if self.window == 0:
             for s in self.sequences:
-                self.X.append([self.to_one_hot[char] for char in s[:-step]])
+                self.X.append([self.to_one_hot[char] for char in s[:-self.step]])
                 if target == 'all':
-                    self.y.append([self.to_one_hot[char] for char in s[step:]])
+                    self.y.append([self.to_one_hot[char] for char in s[self.step:]])
                 elif target == 'one':
-                    self.y.append(s[-step:])
+                    self.y.append(s[-self.step:])
             
-            self.X = np.reshape(self.X, (len(self.X), len(self.sequences[0]) - step, len(self.vocab)))
-            self.y = np.reshape(self.y, (len(self.y), len(self.sequences[0]) - step, len(self.vocab)))
+            self.X = np.reshape(self.X, (len(self.X), len(self.sequences[0]) - self.step, len(self.vocab)))
+            self.y = np.reshape(self.y, (len(self.y), len(self.sequences[0]) - self.step, len(self.vocab)))
         
         else:
             for s in self.sequences:
-                for i in range(0, len(s) - self.window, step):
+                for i in range(0, len(s) - self.window, self.step):
                     self.X.append([self.to_one_hot[char] for char in s[i: i + self.window]])
                     if target == 'all':
                         self.y.append([self.to_one_hot[char] for char in s[i + 1: i + self.window + 1]])
                     elif target == 'one':
-                        self.y.append(s[-step:])
+                        self.y.append(s[-self.step:])
             
             self.X = np.reshape(self.X, (len(self.X), self.window, len(self.vocab)))
             self.y = np.reshape(self.y, (len(self.y), self.window, len(self.vocab)))
@@ -657,7 +655,7 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
          modfile=None, samplelength=36, pad=0, l2_rate=None, cv=None):
     
     # loading sequence data, analyze, pad and encode it
-    data = SequenceHandler(window=window)
+    data = SequenceHandler(window=window, step=step)
     data.load_sequences(infile)
     data.analyze_training()
     
@@ -665,7 +663,7 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
     data.pad_sequences(padlen=pad)
 
     # one-hot encode padded sequences
-    data.one_hot_encode(step=step, target=target)
+    data.one_hot_encode(target=target)
     
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
