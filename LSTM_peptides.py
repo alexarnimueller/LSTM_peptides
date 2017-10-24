@@ -164,9 +164,10 @@ class SequenceHandler(object):
     Class for handling peptide sequences, e.g. loading, one-hot encoding or decoding and saving
     """
     
-    def __init__(self, window=0):
+    def __init__(self, window=0, step=2):
         """
         :param window: {str} window used for chopping up sequences. If 0: False
+        :param step: {int} size of the steps to move the window forward
         """
         self.sequences = None
         self.generated = None
@@ -175,6 +176,7 @@ class SequenceHandler(object):
         self.X = list()
         self.y = list()
         self.window = window
+        self.step = step
         # generate translation dictionary for one-hot encoding
         _, self.to_one_hot, self.vocab = _onehotencode('A')
     
@@ -201,7 +203,7 @@ class SequenceHandler(object):
             padded_seqs = []
             for seq in self.sequences:
                 if len(seq) < self.window:
-                    padded_seq = seq + pad_char * (1 + self.window - len(seq))
+                    padded_seq = seq + pad_char * (self.step + self.window - len(seq))
                 else:
                     padded_seq = seq + pad_char * padlen
                 padded_seqs.append(padded_seq)
@@ -217,11 +219,10 @@ class SequenceHandler(object):
         
         self.sequences = padded_seqs  # overwrite sequences with padded sequences
     
-    def one_hot_encode(self, step=2, target='all'):
+    def one_hot_encode(self, target='all'):
         """Chop up loaded sequences into patterns of length ``window`` by moving by stepsize ``step`` and translate
         them with a one-hot vector encoding
         
-        :param step: {int} size of the steps to move the window forward
         :param target: {str} whether all proceeding AA should be learned or just the last one in sequence (`all`, `one`)
         :return: one-hot encoded sequence patterns in self.X and corresponding target amino acids in self.y
         """
