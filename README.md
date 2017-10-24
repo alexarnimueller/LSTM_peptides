@@ -40,19 +40,25 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - Number of units per LSTM layer.
 - `valsplit` *(OPTIONAL, default=0.2)*
   - Fraction of the data to use for model validation. If 0, no validation is performed.
-- `sample` *(OPTIONAL, default=5)*
+- `cell` *(OPTIONAL, default = 'LSTM')*
+  - Recurrent cell type to use. Available: 'LSTM', 'GRU'
+- `sample` *(OPTIONAL, default=100)*
   - Number of sequences to sample from the model after training.
 - `temp` *(OPTIONAL, default=0.8)*
   - Temperature to use for sampling.
 - `maxlen` *(OPTIONAL, default=48)*
   - Maximum sequence length allowed when sampling new sequences
+- `startchar` *(OPTIONAL, default='B')*
+  - Starting character to begin sampling from. Default: 'B' for 'begin' (independent)
 - `dropout` *(OPTIONAL, default=0.1)*
-  - Fraction of dropout to apply to the network. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout
+  - Fraction of dropout to apply to the recurrent layer. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout
    etc.
 - `train` *(OPTIONAL, default=True)*
   - Whether to train the model (`True`) or just sample from a pre-trained model (`False`).
 - `lr` *(OPTIONAL, default=0.001)*
   - Learning rate to be used for Adam optimizer.
+- `l2` *(OPTIONAL, default=None)*
+  - l2 regularization rate. If None, no l2 regularization is performed.
 - `modfile` *(OPTIONAL, default=None)*
   - If `train=False`, a pre-trained model file needs to be provided.
 - `cv` *(OPTIONAL, default=None)*
@@ -64,7 +70,9 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - Step size to move the sliding window or the prediction target
 - `target` *(OPTIONAL, default='all')*
   - whether to learn all proceeding characters or just the last 'one' in sequence
-
+- `padlen` *(OPTIONAL, default=0)*
+  - number of tailing padding spaces to add to the sequences. If 0, sequences are padded to the length of the longest 
+  sequence in the dataset. 
 
 
 ### Example: sampling 100 sequences from a pre-trained model
