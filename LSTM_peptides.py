@@ -158,6 +158,11 @@ def _sample_with_temp(preds, temp=1.0):
 
 
 def load_model_instance(filename):
+    """load a whole Model class instance from a given epoch file
+
+    :param filename: epoch file, e.g. model_epoch_5.hdf5
+    :return: model instance with trained weights
+    """
     modfile = os.path.dirname(filename) + '/model.p'
     mod = pickle.load(open(modfile, 'rb'))
     hdf5_file = ''.join(modfile.split('.')[:-1]) + '.hdf5'
@@ -166,6 +171,11 @@ def load_model_instance(filename):
 
 
 def save_model_instance(mod):
+    """save a whole Model instance and the corresponding model with weights to two files (model.p and model.hdf5)
+
+    :param mod: model instance
+    :return: saved model files in the checkpoint dir
+    """
     tmp = mod.model
     tmp.save(mod.checkpointdir + 'model.hdf5')
     mod.model = None
