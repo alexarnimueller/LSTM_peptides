@@ -8,7 +8,7 @@ Need to turn off 'ask' when initializing model
 import os
 
 sample = 1000
-temps = [3.5, 4.]
+temps = [.5]
 name = 'desperate'
 sepoch = 249
 l = 1

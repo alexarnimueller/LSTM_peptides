@@ -9,4 +9,4 @@ from modlamp.descriptors import GlobalDescriptor
 
 
 d = GlobalDescriptor(sys.argv[1])
-d.save_fasta(sys.argv[1][:-3] + '.fasta')
+d.save_fasta(sys.argv[1][:-3] + 'fasta')

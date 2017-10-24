@@ -26,6 +26,7 @@ from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
 from modlamp.sequences import Random, Helices
+from modlamp.analysis import GlobalAnalysis
 from modlamp.core import count_aas
 
 sess = tf.Session()
@@ -263,11 +264,12 @@ class SequenceHandler(object):
         print("Minimal sequence length:\t%i" % np.min(d.descriptor))
         print("Maximal sequence length:\t%i" % np.max(d.descriptor))
     
-    def analyze_generated(self, num, fname='analysis.txt'):
+    def analyze_generated(self, num, fname='analysis.txt', plot=False):
         """Method to analyze the generated sequences located in `self.generated`.
 
         :param num: {int} wanted number of sequences to sample
         :param fname: {str} filename to save analysis info to
+        :param plot: {bool} whether to plot an overview of descriptors
         :return: file with analysis info (distances)
         """
         with open(fname, 'w') as f:
@@ -364,6 +366,11 @@ class SequenceHandler(object):
             f.write("Hydrophobic moment of amphipathic seqs:\t%.3f +/- %.3f\n" %
                     (np.mean(uh_hel.descriptor), np.std(uh_hel.descriptor)))
 
+        if plot:
+            a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences],
+                               ['training', 'sampled', 'hel', 'ran'])
+            a.plot_summary(filename=fname[:-3] + '.pdf')
+
     def save_generated(self, logdir, filename):
         """Save all sequences in `self.generated` to file
 
@@ -385,7 +392,7 @@ class Model(object):
     """
     
     def __init__(self, n_vocab, outshape, session_name, cell="LSTM", n_units=256, batch=64, layers=2, lr=0.001,
-                 dropoutfract=0.1, loss='categorical_crossentropy', l2_reg=None, seed=42):
+                 dropoutfract=0.1, loss='categorical_crossentropy', l2_reg=None, ask=True, seed=42):
         """Initialize the model
         
         :param n_vocab: {int} length of vocabulary
@@ -427,7 +434,7 @@ class Model(object):
         self.optimizer = Adam(lr=lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         self.session_name = session_name
         self.logdir = './' + session_name
-        if os.path.exists(self.logdir):
+        if ask and os.path.exists(self.logdir):
             decision = raw_input('\nSession folder already exists!\n'
                                  'Do you want to overwrite the previous session? [y/n] ')
             if decision in ['n', 'no', 'N', 'NO', 'No']:
@@ -662,7 +669,7 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
     # building the LSTM model
     model = Model(n_vocab=len(data.vocab), outshape=len(data.vocab), session_name=sessname, n_units=neurons,
                   batch=batchsize, layers=layers, cell=cell, loss='categorical_crossentropy', lr=learningrate,
-                  dropoutfract=dropout, l2_reg=l2_rate, seed=42)
+                  dropoutfract=dropout, l2_reg=l2_rate, ask=False, seed=42)
 
     if train:
         if cv:
@@ -683,7 +690,7 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
     data.generated = model.sample(sample, start=aa, maxlen=samplelength, show=False, temp=temperature)
-    data.analyze_generated(sample, fname=model.logdir + '/analysis_temp' + str(temperature) + '.txt')
+    data.analyze_generated(sample, fname=model.logdir + '/analysis_temp' + str(temperature) + '.txt', plot=True)
     data.save_generated(model.logdir, model.logdir + '/sampled_sequences_temp' + str(temperature) + '.csv')
 
 
