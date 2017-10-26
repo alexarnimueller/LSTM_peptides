@@ -152,9 +152,8 @@ def _sample_with_temp(preds, temp=1.0):
     :param temp: {float} temperature value to sample at.
     """
     streched = np.log(preds) / temp
-    vocab_size = len(streched)
-    strethced_probs = np.exp(streched) / np.sum(np.exp(streched))
-    return np.random.choice(vocab_size, p=strethced_probs)
+    stretched_probs = np.exp(streched) / np.sum(np.exp(streched))
+    return np.random.choice(len(streched), p=stretched_probs)
 
 
 def load_model_instance(filename):
@@ -302,10 +301,9 @@ class SequenceHandler(object):
             f.write("ANALYSIS OF SAMPLED SEQUENCES\n==============================\n\n")
             f.write("Nr. of duplicates in generated sequences: %i\n" % (len(self.generated) - len(set(self.generated))))
             count = len(set(self.generated) & set(self.sequences))  # get shared entries in both lists
-            f.write("%.1f percent of generated sequences are present in the training data.\n" %
-                    ((count / len(self.generated)) * 100))
+            f.write("%i generated sequences are present in the training data.\n" % count)
 
-            d = GlobalDescriptor(self.generated)
+            d = GlobalDescriptor(set(self.generated))
             len1 = len(d.sequences)
             d.filter_aa('B')
             len2 = len(d.sequences)
@@ -313,7 +311,7 @@ class SequenceHandler(object):
             f.write("\n\nLENGTH DISTRIBUTION OF GENERATED DATA:\n\n")
             f.write("Number of sequences too short:\t%i\n" % (num - len1))
             f.write("Number of invalid (with 'B'):\t%i\n" % (len1 - len2))
-            f.write("Number of valid sequences:\t%i\n" % len2)
+            f.write("Number of valid unique seqs:\t%i\n" % len2)
             f.write("Mean sequence length:     \t%.1f ± %.1f\n" % (np.mean(d.descriptor), np.std(d.descriptor)))
             f.write("Median sequence length:   \t%i\n" % np.median(d.descriptor))
             f.write("Minimal sequence length:  \t%i\n" % np.min(d.descriptor))
@@ -650,7 +648,7 @@ class Model(object):
 
             while sequence[-1] != ' ' and len(sequence) <= longest:  # sample until padding or maxlen is reached
                 x, _, _ = _onehotencode(sequence)
-                preds = self.model.predict(x)[0][0]
+                preds = self.model.predict(x)[0][-1]
                 next_aa = _sample_with_temp(preds, temp=temp)
                 sequence += self.vocab[next_aa]
 

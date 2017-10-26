@@ -6,7 +6,7 @@ Script to perform a grid search with 10-fold cross-validation on different netwo
 
 import os
 
-neurons = [24, 32, 48, 64, 128, 256]
+neurons = [512]  # [24, 32, 48, 64, 128, 256, 512]
 layers = [1, 2]
 dropout = [0.1, 0.2]
 
