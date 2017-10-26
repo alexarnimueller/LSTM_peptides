@@ -48,7 +48,7 @@ flags.DEFINE_integer("neurons", 64, "number of units per layer")
 flags.DEFINE_float("valsplit", 0.2, "percentage of the data to use for validation")
 flags.DEFINE_string("cell", "LSTM", "type of neuron to use, available: LSTM, GRU")
 flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
-flags.DEFINE_float("temp", 2.5, "temperature used for sampling")
+flags.DEFINE_float("temp", 1.0, "temperature used for sampling")
 flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
 flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
 flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
@@ -667,9 +667,19 @@ class Model(object):
 
         print("\t%i sequences were shorter than %i" % (lcntr, minlen))
         return sampled
+
+    def get_params(self):
+        """Method to get the amount of trainable parameters in the model.
+        """
+        trainable = int(np.sum([K.count_params(p) for p in set(self.model.trainable_weights)]))
+        non_trainable = int(np.sum([K.count_params(p) for p in set(self.model.non_trainable_weights)]))
+        print('\nMODEL PARAMETERS')
+        print('Total parameters:         %i' % (trainable + non_trainable))
+        print('Trainable parameters:     %i' % trainable)
+        print('Non-trainable parameters: %i' % non_trainable)
     
     def load_model(self, filename):
-        """Function to load a trained model from a hdf5 file
+        """Method to load a trained model from a hdf5 file
         
         :return: model loaded from file in ``self.model``
         """
@@ -701,6 +711,7 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
             model.cross_val(data.X, data.y, epochs=epochs, cv=cv)
             model.initialize_model(seed=42)
             model.train(data.X, data.y, epochs=epochs, valsplit=0.0, sample=0)
+            model.plot_losses()
         else:
             # training model on data
             print("\nTRAINING MODEL FOR %i EPOCHS...\n" % epochs)
@@ -713,6 +724,8 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
         print("\nUSING PRETRAINED MODEL... (%s)\n" % modfile)
         model = load_model_instance(modfile)
         model.load_model(modfile)
+
+    model.get_params()  # print number of parameters in the model
 
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
