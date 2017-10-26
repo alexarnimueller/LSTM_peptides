@@ -44,7 +44,7 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - Recurrent cell type to use. Available: 'LSTM', 'GRU'
 - `sample` *(OPTIONAL, default=100)*
   - Number of sequences to sample from the model after training.
-- `temp` *(OPTIONAL, default=0.8)*
+- `temp` *(OPTIONAL, default=1.0)*
   - Temperature to use for sampling.
 - `maxlen` *(OPTIONAL, default=48)*
   - Maximum sequence length allowed when sampling new sequences
