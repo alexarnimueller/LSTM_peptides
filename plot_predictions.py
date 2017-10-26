@@ -13,6 +13,6 @@ num = 500  # number of examples to randomly choose (as all temps need the same s
 preds = list()
 for t in temps:
     d = pd.read_csv(f + str(t) + '.txt', delimiter='\t')
-    preds.append(np.random.choice(d['AMP Probability'].tolist(), 500, replace=False))
+    preds.append(np.random.choice(d['Probability'].tolist(), 1554, replace=False))
 
 plot_violin(preds, colors=cols, bp=True, filename=f + '_plot.pdf')

@@ -303,7 +303,7 @@ class SequenceHandler(object):
             count = len(set(self.generated) & set(self.sequences))  # get shared entries in both lists
             f.write("%i generated sequences are present in the training data.\n" % count)
 
-            d = GlobalDescriptor(set(self.generated))
+            d = GlobalDescriptor(list(set(self.generated)))
             len1 = len(d.sequences)
             d.filter_aa('B')
             len2 = len(d.sequences)
