@@ -1,7 +1,8 @@
 # LSTM_peptides
 ## Introduction
-This repository contains scripts for training a generative long short-term memory recurrent neural network on peptide sequences. 
-The code relies on the keras package by Chollet and others (https://github.com/fchollet/keras) with TensorFlow 
+This repository contains scripts for training a generative long short-term memory recurrent neural network on peptide
+sequences presented in Müller, A. T., Hiss, J. A. and Schneider, G. 2017, JCIM, *submitted*.
+The code relies on the keras package by Chollet and others (https://github.com/fchollet/keras) with TensorFlow
 backend (http://tensorflow.org) as well as on scikit-learn (http://scikit-learn.org).
 
 ## Content
@@ -9,17 +10,21 @@ backend (http://tensorflow.org) as well as on scikit-learn (http://scikit-learn.
 - LSTM_peptides.py: contains the main code in the following two classes:
   - `SequenceHandler`: class that is used for reading amino acid sequences and translating them into a one-hot vector encoding. 
   - `Model`: class that generates and trains the model, can perform cross-validation and plot training and validation loss.
- - requirements.txt: requirements / package dependencies
- - LICENSE: MIT opensource license
+- training_sequences_noC.csv: helical antimicrobial peptide sequences used to train the RNN
+- cv.py: script to perform cross-validation to grid-search different model architectures
+- sample.py: script to sample and analyze sequences at different temperatures
+- LICENSE: MIT opensource license
+- requirements.txt: requirements / package dependencies
 
 ## How To Use
-First, install all requirements (in `requirements.txt`). In this folder, type: 
+1) Clone this repository
+2) Install all requirements (in `requirements.txt`). In the cloned folder, type:
 
 ``` bash
 pip install -r requirements.txt
 ```
 
-Then run the model as follows:
+3) Then train the model as follows:
 
 ``` bash
 python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME  $FURTHER_OPTIONAL_PARAMETERS
