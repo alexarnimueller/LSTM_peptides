@@ -79,13 +79,12 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --run_name $YOUR_RUN_NAME 
   - number of tailing padding spaces to add to the sequences. If 0, sequences are padded to the length of the longest 
   sequence in the dataset. 
 
-
-### Example: sampling 100 sequences from a pre-trained model
-``` bash
-python LSTM_peptides.py --run_name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --train False --sample 100
-```
-
-### Example: training a 2-layer model on new sequences for 100 epochs
+### *Example:* training a 2-layer model on new sequences for 100 epochs
 ``` bash
 python LSTM_peptides.py --run_name train100 --dataset new_sequences.csv --layers 2 --epochs 100
+```
+
+### *Example:* sampling 100 sequences from a pre-trained model
+``` bash
+python LSTM_peptides.py --run_name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --train False --sample 100
 ```
