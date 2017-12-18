@@ -1,8 +1,8 @@
 # LSTM_peptides
 ## Introduction
-This repository contains scripts for training a generative long short-term memory recurrent neural network on peptide sequences. 
-The user can provide sets of amino acid sequences to train the model, and finally invoke sampling of sequences that 
-should be similar to the training data. As such, artificial intelligence is put in charge of *de novo* design of new 
+This repository contains scripts for training a generative long short-term memory recurrent neural network on peptide 
+sequences. The user can provide sets of amino acid sequences to train the model, and finally invoke sampling of 
+sequences that should be similar to the training data. As such, artificial intelligence is put in charge of *de novo* design of new 
 peptide sequences. The code in this repository relies on the `keras` package by Chollet and others 
 (https://github.com/fchollet/keras) with `tensorflow` backend (http://tensorflow.org) as well as on 
 `sklearn` (http://scikit-learn.org) and `modlamp` (https://modlamp.org).
@@ -15,7 +15,7 @@ peptide sequences. The code in this repository relies on the `keras` package by 
  - requirements.txt: requirements / package dependencies
  - LICENSE: MIT opensource license
 
-## How To Install
+## How To Install And Use
 Clone the directory to your computer by:
 
 ``` bash
@@ -97,3 +97,9 @@ python LSTM_peptides.py --name testsample --modfile pretrained_model/checkpoint/
 ``` bash
 python LSTM_peptides.py --name finetune10 --dataset finetune_set.csv --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --epochs 10--train False --finetune True
 ```
+
+## Cite
+When using this code for any publication, please cite the following article:
+
+A. T. Müller, J. A. Hiss, G. Schneider, "Recurrent Neural Network Model for Constructive Peptide Design" *J. Chem. Inf
+. Model.* **2017**, under revision.
