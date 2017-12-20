@@ -62,6 +62,7 @@ flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
 flags.DEFINE_string("target", "all", "whether to learn all proceeding characters or just the last `one` in sequence")
 flags.DEFINE_integer("padlen", 0, "number of spaces to use for padding sequences (if window not 0); if 0, sequences are"
                                   " padded to the length of the longest sequence in the dataset")
+flags.DEFINE_boolean("refs", True, "whether reference sequence sets should be generated for the analysis")
 
 FLAGS = flags.FLAGS
 
@@ -184,10 +185,11 @@ def save_model_instance(mod):
 class SequenceHandler(object):
     """ Class for handling peptide sequences, e.g. loading, one-hot encoding or decoding and saving """
     
-    def __init__(self, window=0, step=2):
+    def __init__(self, window=0, step=2, refs=True):
         """
         :param window: {str} window used for chopping up sequences. If 0: False
         :param step: {int} size of the steps to move the window forward
+        :param refs {bool} whether to generate reference sequence sets for analysis
         """
         self.sequences = None
         self.generated = None
@@ -197,6 +199,7 @@ class SequenceHandler(object):
         self.y = list()
         self.window = window
         self.step = step
+        self.refs = refs
         # generate translation dictionary for one-hot encoding
         _, self.to_one_hot, self.vocab = _onehotencode('A')
     
@@ -389,8 +392,11 @@ class SequenceHandler(object):
                     (np.mean(uh_hel.descriptor), np.std(uh_hel.descriptor)))
         
         if plot:
-            a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences],
-                               ['training', 'sampled', 'hel', 'ran'])
+            if self.refs:
+                a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences],
+                                   ['training', 'sampled', 'hel', 'ran'])
+            else:
+                a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences], ['training', 'sampled'])
             a.plot_summary(filename=fname[:-3] + '.pdf')
     
     def save_generated(self, logdir, filename):
@@ -714,9 +720,9 @@ class Model(object):
 
 def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, window=0, step=1, target='all',
          valsplit=0.2, sample=100, aa='B', temperature=2.5, cell="LSTM", dropout=0.1, train=True, learningrate=0.01,
-         modfile=None, samplelength=36, pad=0, l2_rate=None, cv=None, finetune=False):
+         modfile=None, samplelength=36, pad=0, l2_rate=None, cv=None, finetune=False, references=True):
     # loading sequence data, analyze, pad and encode it
-    data = SequenceHandler(window=window, step=step)
+    data = SequenceHandler(window=window, step=step, refs=references)
     print("Loading sequences...")
     data.load_sequences(infile)
     data.analyze_training()
@@ -782,7 +788,7 @@ if __name__ == "__main__":
          temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
          learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
          step=FLAGS.step, aa=FLAGS.startchar, l2_rate=FLAGS.l2, target=FLAGS.target, pad=FLAGS.padlen,
-         finetune=FLAGS.finetune)
+         finetune=FLAGS.finetune, references=FLAGS.refs)
     
     # save used flags to log file
     _save_flags(FLAGS, "./" + FLAGS.name + "/flags.txt")

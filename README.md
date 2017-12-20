@@ -82,6 +82,9 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --name $YOUR_RUN_NAME  $FU
 - `padlen` *(OPTIONAL, default=0)*
   - number of tailing padding spaces to add to the sequences. If 0, sequences are padded to the length of the longest 
   sequence in the dataset. 
+- `refs`, *(OPTIONAL, default=`True`*
+  - whether reference sequence sets should be generated for the analysis
+
 
 ### Example: training a 2-layer model with 64 neurons on new sequences for 100 epochs
 ``` bash
