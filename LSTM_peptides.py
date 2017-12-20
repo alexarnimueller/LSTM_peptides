@@ -397,7 +397,7 @@ class SequenceHandler(object):
                                    ['training', 'sampled', 'hel', 'ran'])
             else:
                 a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences], ['training', 'sampled'])
-            a.plot_summary(filename=fname[:-3] + '.pdf')
+            a.plot_summary(filename=fname[:-4] + '.png')
     
     def save_generated(self, logdir, filename):
         """ Save all sequences in `self.generated` to file
