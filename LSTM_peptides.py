@@ -473,6 +473,13 @@ class Model(object):
 
         :return: initialized model in ``self.model``
         """
+        self.losses = list()
+        self.val_losses = list()
+        self.cv_loss = None
+        self.cv_loss_std = None
+        self.cv_val_loss = None
+        self.cv_val_loss_std = None
+        self.model = None
         weight_init = RandomNormal(mean=0.0, stddev=0.05, seed=seed)  # weights randomly between -0.05 and 0.05
         optimizer = Adam(lr=self.lr, beta_1=0.9, beta_2=0.999, epsilon=1e-08, decay=0.0)
         
