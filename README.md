@@ -105,4 +105,4 @@ python LSTM_peptides.py --name finetune10 --dataset finetune_set.csv --modfile p
 When using this code for any publication, please cite the following article:
 
 A. T. Müller, J. A. Hiss, G. Schneider, "Recurrent Neural Network Model for Constructive Peptide Design" *J. Chem. Inf
-. Model.* **2017**, under revision.
+. Model.* **2018**, accepted.
