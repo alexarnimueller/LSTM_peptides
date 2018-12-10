@@ -67,16 +67,15 @@ flags.DEFINE_boolean("refs", True, "whether reference sequence sets should be ge
 FLAGS = flags.FLAGS
 
 
-def _save_flags(flgs, filename):
+def _save_flags(filename):
     """ Function to save used tf.FLAGS to log-file
 
-    :param flgs: tensorflow flags
     :return: saved file
     """
     with open(filename, 'w') as f:
         f.write("Used flags:\n-----------\n")
-        for k, v in flgs.__dict__['__flags'].items():
-            f.write(k + ": " + str(v) + "\n")
+        for k, v in tf.flags.FLAGS.__flags.items():
+            f.write(k + ": " + str(v.value) + "\n")
 
 
 def _onehotencode(s, vocab=None):
@@ -311,10 +310,10 @@ class SequenceHandler(object):
             f.write("Number of sequences too short:\t%i\n" % (num - len1))
             f.write("Number of invalid (with 'B'):\t%i\n" % (len1 - len2))
             f.write("Number of valid unique seqs:\t%i\n" % len2)
-            f.write("Mean sequence length:     \t%.1f ± %.1f\n" % (np.mean(d.descriptor), np.std(d.descriptor)))
-            f.write("Median sequence length:   \t%i\n" % np.median(d.descriptor))
-            f.write("Minimal sequence length:  \t%i\n" % np.min(d.descriptor))
-            f.write("Maximal sequence length:  \t%i\n" % np.max(d.descriptor))
+            f.write("Mean sequence length:     \t\t%.1f ± %.1f\n" % (np.mean(d.descriptor), np.std(d.descriptor)))
+            f.write("Median sequence length:   \t\t%i\n" % np.median(d.descriptor))
+            f.write("Minimal sequence length:  \t\t%i\n" % np.min(d.descriptor))
+            f.write("Maximal sequence length:  \t\t%i\n" % np.max(d.descriptor))
             
             descriptor = 'pepcats'
             seq_desc = PeptideDescriptor([s[1:].rstrip() for s in self.sequences], descriptor)
@@ -384,19 +383,19 @@ class SequenceHandler(object):
             f.write("\n\nHYDROPHOBIC MOMENTS\n\n")
             f.write("Hydrophobic moment of training seqs:\t%.3f +/- %.3f\n" %
                     (np.mean(uh_seq.descriptor), np.std(uh_seq.descriptor)))
-            f.write("Hydrophobic moment of sampled seqs:\t%.3f +/- %.3f\n" %
+            f.write("Hydrophobic moment of sampled seqs:\t\t%.3f +/- %.3f\n" %
                     (np.mean(uh_gen.descriptor), np.std(uh_gen.descriptor)))
-            f.write("Hydrophobic moment of random seqs:\t%.3f +/- %.3f\n" %
+            f.write("Hydrophobic moment of random seqs:\t\t%.3f +/- %.3f\n" %
                     (np.mean(uh_ran.descriptor), np.std(uh_ran.descriptor)))
             f.write("Hydrophobic moment of amphipathic seqs:\t%.3f +/- %.3f\n" %
                     (np.mean(uh_hel.descriptor), np.std(uh_hel.descriptor)))
         
         if plot:
             if self.refs:
-                a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences],
+                a = GlobalAnalysis(np.array([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences]),
                                    ['training', 'sampled', 'hel', 'ran'])
             else:
-                a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences], ['training', 'sampled'])
+                a = GlobalAnalysis(np.array([uh_seq.sequences, uh_gen.sequences]), ['training', 'sampled'])
             a.plot_summary(filename=fname[:-4] + '.png')
     
     def save_generated(self, logdir, filename):
@@ -791,4 +790,4 @@ if __name__ == "__main__":
          finetune=FLAGS.finetune, references=FLAGS.refs)
     
     # save used flags to log file
-    _save_flags(FLAGS, "./" + FLAGS.name + "/flags.txt")
+    _save_flags("./" + FLAGS.name + "/flags.txt")
