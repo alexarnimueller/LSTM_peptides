@@ -11,17 +11,18 @@ import json
 import os
 import pickle
 import random
+import argparse
 
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from keras import backend as K
-from keras.callbacks import ModelCheckpoint
-from keras.initializers import RandomNormal
-from keras.layers import Dense, LSTM, GRU
-from keras.models import Sequential, load_model
-from keras.optimizers import Adam
-from keras.regularizers import l2
+
+from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.initializers import RandomNormal
+from tensorflow.keras.layers import Dense, LSTM, GRU
+from tensorflow.keras.models import Sequential, load_model
+from tensorflow.keras.optimizers import Adam
+from tensorflow.keras.regularizers import l2
 from modlamp.analysis import GlobalAnalysis
 from modlamp.core import count_aas
 from modlamp.descriptors import PeptideDescriptor, GlobalDescriptor
@@ -32,50 +33,42 @@ from sklearn.model_selection import KFold
 from sklearn.preprocessing import StandardScaler
 
 plt.switch_backend('agg')
-sess = tf.Session()
-K.set_session(sess)
-
-flags = tf.app.flags
-
-flags.DEFINE_string("dataset", "training_sequences_noC.csv", "dataset file (expecting csv)")
-flags.DEFINE_string("name", "test", "run name for log and checkpoint files")
-flags.DEFINE_integer("batch_size", 128, "batch size")
-flags.DEFINE_integer("epochs", 50, "epochs to train")
-flags.DEFINE_integer("layers", 2, "number of layers in the network")
-flags.DEFINE_integer("neurons", 256, "number of units per layer")
-flags.DEFINE_string("cell", "LSTM", "type of neuron to use, available: LSTM, GRU")
-flags.DEFINE_float("dropout", 0.1, "dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.")
-flags.DEFINE_bool("train", True, "whether the network should be trained or just sampled from")
-flags.DEFINE_float("valsplit", 0.2, "fraction of the data to use for validation")
-flags.DEFINE_integer("sample", 100, "number of sequences to sample training")
-flags.DEFINE_float("temp", 1.25, "temperature used for sampling")
-flags.DEFINE_integer("maxlen", 0, "maximum sequence length allowed when sampling new sequences")
-flags.DEFINE_string("startchar", "B", "starting character to begin sampling. Default='B' for 'begin'")
-flags.DEFINE_float("lr", 0.01, "learning rate to be used with the Adam optimizer")
-flags.DEFINE_float("l2", None, "l2 regularization rate. If None, no l2 regularization is used")
-flags.DEFINE_string("modfile", None, "filename of the pretrained model to used for sampling if train=False")
-flags.DEFINE_boolean("finetune", False, "if True, a pretrained model provided in modfile is finetuned on the dataset")
-flags.DEFINE_integer("cv", None, "number of folds to use for cross-validation; if None, no CV is performed")
-flags.DEFINE_integer("window", 0, "window size used to process sequences. If 0, all sequences are padded to the "
-                                  "longest sequence length in the dataset")
-flags.DEFINE_integer("step", 1, "step size to move window or prediction target")
-flags.DEFINE_string("target", "all", "whether to learn all proceeding characters or just the last `one` in sequence")
-flags.DEFINE_integer("padlen", 0, "number of spaces to use for padding sequences (if window not 0); if 0, sequences are"
-                                  " padded to the length of the longest sequence in the dataset")
-flags.DEFINE_boolean("refs", True, "whether reference sequence sets should be generated for the analysis")
-
-FLAGS = flags.FLAGS
+flags = argparse.ArgumentParser()
+flags.add_argument("-d", "--dataset", default="training_sequences_noC.csv", help="dataset file (expecting csv)", type=str)
+flags.add_argument("-n", "--name", default="test", help="run name for log and checkpoint files", type=str)
+flags.add_argument("-b", "--batch_size", default=128, help="batch size", type=int)
+flags.add_argument("-e", "--epochs", default=50, help="epochs to train", type=int)
+flags.add_argument("-l", "--layers", default=2, help="number of layers in the network", type=int)
+flags.add_argument("-x", "--neurons", default=256, help="number of units per layer", type=int)
+flags.add_argument("-c", "--cell", default="LSTM", help="type of neuron to use, available: LSTM, GRU", type=str)
+flags.add_argument("-o", "--dropout", default=0.1, help="dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.", type=float)
+flags.add_argument("-t", "--train", default=True, help="whether the network should be trained or just sampled from", type=bool)
+flags.add_argument("-v", "--valsplit", default=0.2, help="fraction of the data to use for validation", type=float)
+flags.add_argument("-s", "--sample", default=100, help="number of sequences to sample training", type=int)
+flags.add_argument("-p", "--temp", default=1.25, help="temperature used for sampling", type=float)
+flags.add_argument("-m", "--maxlen", default=0, help="maximum sequence length allowed when sampling new sequences", type=int)
+flags.add_argument("-a", "--startchar", default="B", help="starting character to begin sampling. Default='B' for 'begin'", type=str)
+flags.add_argument("-r", "--lr", default=0.01, help="learning rate to be used with the Adam optimizer", type=float)
+flags.add_argument("--l2", default=None, help="l2 regularization rate. If None, no l2 regularization is used", type=float)
+flags.add_argument("--modfile", default=None, help="filename of the pretrained model to used for sampling if train=False", type=str)
+flags.add_argument("--finetune", default=False, help="if True, a pretrained model provided in modfile is finetuned on the dataset", type=bool)
+flags.add_argument("--cv", default=None, help="number of folds to use for cross-validation; if None, no CV is performed", type=int)
+flags.add_argument("--window", default=0, help="window size used to process sequences. If 0, all sequences are padded to the longest sequence length in the dataset", type=int)
+flags.add_argument("--step", default=1, help="step size to move window or prediction target", type=int)
+flags.add_argument("--target", default="all", help="whether to learn all proceeding characters or just the last `one` in sequence", type=str)
+flags.add_argument("--padlen", default=0, help="number of spaces to use for padding sequences (if window not 0); if 0, sequences are padded to the length of the longest sequence in the dataset", type=int)
+flags.add_argument("--refs", default=True, help="whether reference sequence sets should be generated for the analysis", type=bool)
+args = flags.parse_args()
 
 
 def _save_flags(filename):
-    """ Function to save used tf.FLAGS to log-file
+    """ Function to save used arguments to log-file
 
     :return: saved file
     """
     with open(filename, 'w') as f:
         f.write("Used flags:\n-----------\n")
-        for k, v in tf.flags.FLAGS.__flags.items():
-            f.write(k + ": " + str(v.value) + "\n")
+        json.dump(args.__dict__, f, indent=2)
 
 
 def _onehotencode(s, vocab=None):
@@ -392,10 +385,10 @@ class SequenceHandler(object):
         
         if plot:
             if self.refs:
-                a = GlobalAnalysis(np.array([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences]),
+                a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences, uh_hel.sequences, uh_ran.sequences],
                                    ['training', 'sampled', 'hel', 'ran'])
             else:
-                a = GlobalAnalysis(np.array([uh_seq.sequences, uh_gen.sequences]), ['training', 'sampled'])
+                a = GlobalAnalysis([uh_seq.sequences, uh_gen.sequences], ['training', 'sampled'])
             a.plot_summary(filename=fname[:-4] + '.png')
     
     def save_generated(self, logdir, filename):
@@ -458,10 +451,10 @@ class Model(object):
         self.logdir = './' + session_name
         self.l2 = l2_reg
         if ask and os.path.exists(self.logdir):
-            decision = raw_input('\nSession folder already exists!\n'
+            decision = input('\nSession folder already exists!\n'
                                  'Do you want to overwrite the previous session? [y/n] ')
             if decision in ['n', 'no', 'N', 'NO', 'No']:
-                self.logdir = './' + raw_input('Enter new session name: ')
+                self.logdir = './' + input('Enter new session name: ')
                 os.makedirs(self.logdir)
         self.checkpointdir = self.logdir + '/checkpoint/'
         if not os.path.exists(self.checkpointdir):
@@ -520,7 +513,7 @@ class Model(object):
         self.model.compile(loss=self.losstype, optimizer=optimizer)
         with open(self.checkpointdir + "model.json", 'w') as f:
             json.dump(self.model.to_json(), f)
-        self.get_num_params()
+        self.model.summary()
     
     def finetuneinit(self, session_name):
         """ Method to generate a new directory for finetuning a pre-existing model on a new dataset with a new name
@@ -531,10 +524,10 @@ class Model(object):
         self.session_name = session_name
         self.logdir = './' + session_name
         if os.path.exists(self.logdir):
-            decision = raw_input('\nSession folder already exists!\n'
+            decision = input('\nSession folder already exists!\n'
                                  'Do you want to overwrite the previous session? [y/n] ')
             if decision in ['n', 'no', 'N', 'NO', 'No']:
-                self.logdir = './' + raw_input('Enter new session name: ')
+                self.logdir = './' + input('Enter new session name: ')
                 os.makedirs(self.logdir)
         self.checkpointdir = self.logdir + '/checkpoint/'
         if not os.path.exists(self.checkpointdir):
@@ -550,26 +543,23 @@ class Model(object):
         :param sample: {int} number of sequences to sample after every training epoch
         :return: trained model and measured losses in self.model, self.losses and self.val_losses
         """
-        writer = tf.summary.FileWriter('./logs/' + self.session_name, graph=sess.graph)
-        for e in range(epochs):
-            print("Epoch %i" % e)
-            checkpoints = [ModelCheckpoint(filepath=self.checkpointdir + 'model_epoch_%i.hdf5' % e, verbose=0)]
-            train_history = self.model.fit(x, y, epochs=1, batch_size=self.batchsize, validation_split=valsplit,
-                                           shuffle=False, callbacks=checkpoints)
-            loss_sum = tf.Summary(value=[tf.Summary.Value(tag="loss", simple_value=train_history.history['loss'][-1])])
-            writer.add_summary(loss_sum, e)
-            
-            self.losses.append(train_history.history['loss'])
-            if valsplit > 0.:
-                self.val_losses.append(train_history.history['val_loss'])
-                val_loss_sum = tf.Summary(value=[tf.Summary.Value(tag="val_loss", simple_value=train_history.history[
-                    'val_loss'][-1])])
-                writer.add_summary(val_loss_sum, e)
-            if sample:
-                for s in self.sample(sample):  # sample sequences after every training epoch
-                    print(s)
-        writer.close()
-    
+        writer = tf.summary.create_file_writer('./logs/' + self.session_name)
+        with writer.as_default():
+            for e in range(epochs):
+                print("Epoch %i" % e)
+                checkpoints = [ModelCheckpoint(filepath=self.checkpointdir + 'model_epoch_%i.hdf5' % e, verbose=0)]
+                train_history = self.model.fit(x, y, epochs=1, batch_size=self.batchsize, validation_split=valsplit,
+                                               shuffle=False, callbacks=checkpoints)
+                tf.summary.scalar('loss', train_history.history['loss'][-1], step=e)
+                self.losses.append(train_history.history['loss'])
+                if valsplit > 0.:
+                    self.val_losses.append(train_history.history['val_loss'])
+                    tf.summary.scalar('val_loss', train_history.history['val_loss'][-1], step=e)
+                if sample:
+                    for s in self.sample(sample):  # sample sequences after every training epoch
+                        print(s)
+            writer.close()
+
     def cross_val(self, x, y, epochs=100, cv=5, plot=True):
         """ Method to perform cross-validation with the model given data X, y
 
@@ -698,23 +688,23 @@ class Model(object):
         
         print("\t%i sequences were shorter than %i" % (lcntr, minlen))
         return sampled
-    
-    def get_num_params(self):
-        """Method to get the amount of trainable parameters in the model.
-        """
-        trainable = int(np.sum([K.count_params(p) for p in set(self.model.trainable_weights)]))
-        non_trainable = int(np.sum([K.count_params(p) for p in set(self.model.non_trainable_weights)]))
-        print('\nMODEL PARAMETERS')
-        print('Total parameters:         %i' % (trainable + non_trainable))
-        print('Trainable parameters:     %i' % trainable)
-        print('Non-trainable parameters: %i' % non_trainable)
-    
+
     def load_model(self, filename):
         """Method to load a trained model from a hdf5 file
 
         :return: model loaded from file in ``self.model``
         """
         self.model.load_weights(filename)
+
+    # def get_num_params(self):
+    #     """Method to get the amount of trainable parameters in the model.
+    #     """
+    #     trainable = np.sum([np.prod(v.get_shape().as_list()) for v in tf.trainable_variables()])
+    #     non_trainable = np.sum([np.prod(v.get_shape().as_list()) for v in tf.non_trainable_variables()])
+    #     print('\nMODEL PARAMETERS')
+    #     print('Total parameters:         %i' % (trainable + non_trainable))
+    #     print('Trainable parameters:     %i' % trainable)
+    #     print('Non-trainable parameters: %i' % non_trainable)
 
 
 def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, window=0, step=1, target='all',
@@ -771,7 +761,7 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
         model = load_model_instance(modfile)
         model.load_model(modfile)
     
-    print(model.get_num_params())  # print number of parameters in the model
+    print(model.model.summary())  # print number of parameters in the model
     
     # generating new data through sampling
     print("\nSAMPLING %i SEQUENCES...\n" % sample)
@@ -782,12 +772,12 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
 
 if __name__ == "__main__":
     # run main code
-    main(infile=FLAGS.dataset, sessname=FLAGS.name, batchsize=FLAGS.batch_size, epochs=FLAGS.epochs,
-         layers=FLAGS.layers, valsplit=FLAGS.valsplit, neurons=FLAGS.neurons, cell=FLAGS.cell, sample=FLAGS.sample,
-         temperature=FLAGS.temp, dropout=FLAGS.dropout, train=FLAGS.train, modfile=FLAGS.modfile,
-         learningrate=FLAGS.lr, cv=FLAGS.cv, samplelength=FLAGS.maxlen, window=FLAGS.window,
-         step=FLAGS.step, aa=FLAGS.startchar, l2_rate=FLAGS.l2, target=FLAGS.target, pad=FLAGS.padlen,
-         finetune=FLAGS.finetune, references=FLAGS.refs)
+    main(infile=args.dataset, sessname=args.name, batchsize=args.batch_size, epochs=args.epochs,
+         layers=args.layers, valsplit=args.valsplit, neurons=args.neurons, cell=args.cell, sample=args.sample,
+         temperature=args.temp, dropout=args.dropout, train=args.train, modfile=args.modfile,
+         learningrate=args.lr, cv=args.cv, samplelength=args.maxlen, window=args.window,
+         step=args.step, aa=args.startchar, l2_rate=args.l2, target=args.target, pad=args.padlen,
+         finetune=args.finetune, references=args.refs)
     
     # save used flags to log file
-    _save_flags("./" + FLAGS.name + "/flags.txt")
+    _save_flags("./" + args.name + "/flags.txt")
