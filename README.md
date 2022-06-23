@@ -52,8 +52,8 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --name $YOUR_RUN_NAME $FUR
 - `dropout` *(OPTIONAL, default=`0.1`)*
   - Fraction of dropout to apply to the network. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout
    etc.
-- `mode` *(OPTIONAL, choices=\["pretrain". "finetune", "sample"\]. default="pretrain", )*
-  - Whether to pre-train (`"pretrain"`), fine-tune (`"finetune"`) or just sample from a pre-trained model (`"sample"`).
+- `mode` *(OPTIONAL, choices=\[pretrain. finetune, sample\]. default=pretrain)*
+  - Whether to pre-train (`pretrain`), fine-tune (`finetune`) or just sample from a pre-trained model (`sample`).
 - `valsplit` *(OPTIONAL, default=`0.2`)*
   - Fraction of the data to use for model validation. If 0, no validation is performed.
 - `sample` *(OPTIONAL, default=`100`)*
