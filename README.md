@@ -31,7 +31,7 @@ pip install -r requirements.txt
 Finally run the model as follows (with your own parameters provided, see the list below):
 
 ``` bash
-python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --name $YOUR_RUN_NAME  $FURTHER_OPTIONAL_PARAMETERS
+python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --name $YOUR_RUN_NAME $FURTHER_OPTIONAL_PARAMETERS
 ```
 
 #### Parameters:
@@ -52,8 +52,8 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --name $YOUR_RUN_NAME  $FU
 - `dropout` *(OPTIONAL, default=`0.1`)*
   - Fraction of dropout to apply to the network. This scales with depth, so layer1 gets 1\*dropout, Layer2 2\*dropout
    etc.
-- `train` *(OPTIONAL, default=`True`)*
-  - Whether to train the model (`True`) or just sample from a pre-trained model (`False`).
+- `mode` *(OPTIONAL, choices=\[pretrain. finetune, sample\], default=pretrain)*
+  - Whether to pre-train (`pretrain`), fine-tune (`finetune`) or just sample from a pre-trained model (`sample`).
 - `valsplit` *(OPTIONAL, default=`0.2`)*
   - Fraction of the data to use for model validation. If 0, no validation is performed.
 - `sample` *(OPTIONAL, default=`100`)*
@@ -86,19 +86,19 @@ python LSTM_peptides.py --dataset $TRAINING_DATA_FILE --name $YOUR_RUN_NAME  $FU
   - whether reference sequence sets should be generated for the analysis
 
 
-### Example: training a 2-layer model with 64 neurons on new sequences for 100 epochs
+### Example: pre-training a 2-layer model with 64 neurons on new sequences for 100 epochs
 ``` bash
-python LSTM_peptides.py --name train100 --dataset new_sequences.csv --layers 2 --neurons 64 --epochs 100
+python LSTM_peptides.py --mode pretrain --name train100 --dataset new_sequences.csv --layers 2 --neurons 64 --epochs 100
 ```
 
 ### Example: sampling 100 sequences from a pre-trained model
 ``` bash
-python LSTM_peptides.py --name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --train False --sample 100
+python LSTM_peptides.py --mode sample --name testsample --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --sample 100
 ```
 
 ### Example: finetune a pre-trained model on a finetuning set for 10 epochs
 ``` bash
-python LSTM_peptides.py --name finetune10 --dataset finetune_set.csv --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --epochs 10--train False --finetune True
+python LSTM_peptides.py --mode finetune --name finetune10 --dataset finetune_set.csv --modfile pretrained_model/checkpoint/model_epoch_99.hdf5 --epochs 10
 ```
 
 ## Cite

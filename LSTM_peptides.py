@@ -42,7 +42,7 @@ flags.add_argument("-l", "--layers", default=2, help="number of layers in the ne
 flags.add_argument("-x", "--neurons", default=256, help="number of units per layer", type=int)
 flags.add_argument("-c", "--cell", default="LSTM", help="type of neuron to use, available: LSTM, GRU", type=str)
 flags.add_argument("-o", "--dropout", default=0.1, help="dropout to use in every layer; layer 1 gets 1*dropout, layer 2 2*dropout etc.", type=float)
-flags.add_argument("-t", "--train", default=True, help="whether the network should be trained or just sampled from", type=bool)
+flags.add_argument("--mode", default='pretrain', help="whether the network should be pre-trained, fine-tuned, or just sampled.", type=str, choices=['pretrain', 'finetune', 'sample'])
 flags.add_argument("-v", "--valsplit", default=0.2, help="fraction of the data to use for validation", type=float)
 flags.add_argument("-s", "--sample", default=100, help="number of sequences to sample training", type=int)
 flags.add_argument("-p", "--temp", default=1.25, help="temperature used for sampling", type=float)
@@ -51,7 +51,6 @@ flags.add_argument("-a", "--startchar", default="B", help="starting character to
 flags.add_argument("-r", "--lr", default=0.01, help="learning rate to be used with the Adam optimizer", type=float)
 flags.add_argument("--l2", default=None, help="l2 regularization rate. If None, no l2 regularization is used", type=float)
 flags.add_argument("--modfile", default=None, help="filename of the pretrained model to used for sampling if train=False", type=str)
-flags.add_argument("--finetune", default=False, help="if True, a pretrained model provided in modfile is finetuned on the dataset", type=bool)
 flags.add_argument("--cv", default=None, help="number of folds to use for cross-validation; if None, no CV is performed", type=int)
 flags.add_argument("--window", default=0, help="window size used to process sequences. If 0, all sequences are padded to the longest sequence length in the dataset", type=int)
 flags.add_argument("--step", default=1, help="step size to move window or prediction target", type=int)
@@ -772,12 +771,15 @@ def main(infile, sessname, neurons=64, layers=2, epochs=100, batchsize=128, wind
 
 if __name__ == "__main__":
     # run main code
+    mode = args.mode
+    train = mode == 'pretrain'
+    finetune = mode == 'finetune'
     main(infile=args.dataset, sessname=args.name, batchsize=args.batch_size, epochs=args.epochs,
          layers=args.layers, valsplit=args.valsplit, neurons=args.neurons, cell=args.cell, sample=args.sample,
-         temperature=args.temp, dropout=args.dropout, train=args.train, modfile=args.modfile,
+         temperature=args.temp, dropout=args.dropout, train=train, modfile=args.modfile,
          learningrate=args.lr, cv=args.cv, samplelength=args.maxlen, window=args.window,
          step=args.step, aa=args.startchar, l2_rate=args.l2, target=args.target, pad=args.padlen,
-         finetune=args.finetune, references=args.refs)
+         finetune=finetune, references=args.refs)
     
     # save used flags to log file
     _save_flags("./" + args.name + "/flags.txt")
